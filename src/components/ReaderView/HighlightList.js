@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { FiX, FiTrash2, FiClock, FiBookOpen, FiSearch } from 'react-icons/fi';
+import { FiX, FiTrash2, FiClock, FiBookOpen } from 'react-icons/fi';
 import { useHighlights } from '../../context/HighlightContext';
 
 const Container = styled.div`

@@ -87,8 +87,8 @@ export class EpubAnalyzer {
       }
 
       // 4. 일반적인 EPUB 구조 확인
-      const hasOEBPS = zipContent.files['OEBPS/'] || Object.keys(zipContent.files).some(f => f.startsWith('OEBPS/'));
-      const hasContent = zipContent.files['content.opf'] || Object.keys(zipContent.files).some(f => f.endsWith('.opf'));
+      // const hasOEBPS = zipContent.files['OEBPS/'] || Object.keys(zipContent.files).some(f => f.startsWith('OEBPS/'));
+      // const hasContent = zipContent.files['content.opf'] || Object.keys(zipContent.files).some(f => f.endsWith('.opf'));
       
       return analysis;
     } catch (error) {

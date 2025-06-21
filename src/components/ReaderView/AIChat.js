@@ -415,7 +415,7 @@ const renderMarkdown = (text) => {
     .replace(/^## (.*$)/gm, '<h2>$1</h2>')
     .replace(/^# (.*$)/gm, '<h1>$1</h1>')
     // 리스트
-    .replace(/^\- (.*$)/gm, '<li>$1</li>')
+    .replace(/^- (.*$)/gm, '<li>$1</li>')
     .replace(/^(\d+)\. (.*$)/gm, '<li>$1. $2</li>')
     // 인용구
     .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>')

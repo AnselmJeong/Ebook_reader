@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { FiChevronLeft, FiChevronRight } from 'react-icons/fi';
-import { useHighlights } from '../../context/HighlightContext';
-import { useChat } from '../../context/ChatContext';
+// import { useHighlights } from '../../context/HighlightContext';
+// import { useChat } from '../../context/ChatContext';
 
 // foliate-js는 ES 모듈로 import
 const FOLIATE_BASE_URL = 'https://cdn.jsdelivr.net/npm/foliate-js@1.0.1/';
@@ -122,12 +122,12 @@ const TextRenderer = ({
   const [error, setError] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [totalPages, setTotalPages] = useState(1);
-  const [currentLocation, setCurrentLocation] = useState(null);
+  // const [currentLocation, setCurrentLocation] = useState(null);
   const viewerRef = useRef(null);
   const containerRef = useRef(null);
   
-  const { addHighlight } = useHighlights();
-  const { startChat } = useChat();
+  // const { addHighlight } = useHighlights();
+  // const { startChat } = useChat();
 
   // foliate-js 동적 로드 함수
   const loadFoliateJS = async () => {
@@ -146,7 +146,7 @@ const TextRenderer = ({
   };
 
   // EPUB 뷰어 초기화
-  const initializeViewer = async () => {
+  const initializeViewer = useCallback(async () => {
     if (!book || !containerRef.current) return;
 
     try {
@@ -223,7 +223,7 @@ const TextRenderer = ({
       // 페이지 이벤트 리스너
       view.addEventListener('relocate', (event) => {
         const location = event.detail;
-        setCurrentLocation(location);
+        // setCurrentLocation(location);
         
         if (location.range) {
           const pageNumber = Math.floor(location.range.start * epub.sections.length) + 1;
@@ -254,14 +254,14 @@ const TextRenderer = ({
       setError(`뷰어 초기화 실패: ${error.message}`);
       setLoading(false);
     }
-  };
+  }, [book, settings, currentPage, onPageChange, onTotalPagesChange, onTextSelection]);
 
   // 책이 변경될 때 뷰어 초기화
   useEffect(() => {
     if (book) {
       initializeViewer();
     }
-  }, [book]);
+  }, [book, initializeViewer]);
 
   // 설정이 변경될 때 뷰어 업데이트
   useEffect(() => {

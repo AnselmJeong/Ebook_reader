@@ -215,7 +215,6 @@ const BookCard = ({ book, onClick }) => {
   const { removeBook } = useBooks();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [isImageLoading, setIsImageLoading] = useState(false);
   const menuRef = useRef(null);
 
   // 외부 클릭 시 메뉴 닫기
@@ -346,12 +345,10 @@ const BookCard = ({ book, onClick }) => {
   };
 
   const handleImageLoad = useCallback(() => {
-    setIsImageLoading(false);
     setImageError(false);
   }, []);
 
   const handleImageError = useCallback(() => {
-    setIsImageLoading(false);
     setImageError(true);
   }, []);
 

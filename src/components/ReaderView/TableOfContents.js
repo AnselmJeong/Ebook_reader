@@ -193,7 +193,7 @@ const TableOfContents = ({ book, currentPage, onPageChange, onClose, chapters: b
         ];
       }
     }
-  }, [bookChapters, book?.id, book?.type]);
+  }, [bookChapters, book?.type]);
 
 
 

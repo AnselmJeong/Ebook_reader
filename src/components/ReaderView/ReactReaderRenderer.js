@@ -105,7 +105,7 @@ const ReactReaderRenderer = forwardRef(({
   const { startChat } = useChat();
   
   // Highlight 훅
-  const { addHighlight, getHighlightsByPage, getHighlights } = useHighlights();
+  const { addHighlight, getHighlights } = useHighlights();
   
   // 하이라이트 색상 옵션 (파스텔 톤)
   const highlightColors = [
@@ -724,7 +724,7 @@ const ReactReaderRenderer = forwardRef(({
 
       // 현재 위치의 하이라이트 가져오기 (CFI 기반)
       const allHighlights = getHighlights ? getHighlights(book.id) : [];
-      const currentLocation = renditionRef.current?.location;
+      // const currentLocation = renditionRef.current?.location;
       
       console.log(`📚 현재 위치의 저장된 하이라이트 ${allHighlights.length}개 복원 시작`);
 
@@ -739,7 +739,7 @@ const ReactReaderRenderer = forwardRef(({
 
         const textNodes = [];
         let node;
-        while (node = walker.nextNode()) {
+        while ((node = walker.nextNode())) {
           textNodes.push(node);
         }
 
@@ -805,7 +805,7 @@ const ReactReaderRenderer = forwardRef(({
         console.warn('⚠️ 하이라이트 복원 실패:', error);
       }
     }
-  }), [goToChapter, goToLocation, restoreHighlightsFunc]);
+  }), [goToChapter, goToLocation, restoreHighlightsFunc, location, totalPages]);
 
   // 목차 변경 핸들러 (useCallback으로 메모이제이션) - 무한 루프 방지를 위해 ref 사용
   const lastTocRef = useRef(null);
@@ -1163,7 +1163,7 @@ const ReactReaderRenderer = forwardRef(({
           if (err?.message && (
             err.message.includes('package') ||
             err.message.includes('Cannot read properties of undefined') ||
-            err.message.includes('undefined') && err.message.includes('reading') ||
+            (err.message.includes('undefined') && err.message.includes('reading')) ||
             err.message.includes('parsing') ||
             err.message.includes('spine')
           )) {
@@ -1329,6 +1329,7 @@ const ReactReaderRenderer = forwardRef(({
   };
 
   // CFI에서 spine index 추출 (개선된 버전)
+  /*
   const getSpineIndexFromCFI = (cfi) => {
     try {
       if (!cfi) return null;
@@ -1378,8 +1379,10 @@ const ReactReaderRenderer = forwardRef(({
       return null;
     }
   };
+  */
 
   // 진행률로부터 챕터 추정 (TOC 기반)
+  /*
   const getChapterFromProgress = (progress, chapters) => {
     try {
       if (!chapters || chapters.length === 0) {
@@ -1405,8 +1408,10 @@ const ReactReaderRenderer = forwardRef(({
       return 1;
     }
   };
+  */
 
   // spine index를 실제 챕터 번호로 매핑
+  /*
   const getChapterFromSpineIndex = (spineIndex, chapters) => {
     try {
       if (spineIndex === null || !chapters || chapters.length === 0) {
@@ -1432,6 +1437,7 @@ const ReactReaderRenderer = forwardRef(({
       return 1;
     }
   };
+  */
 
   // 현재 위치의 챕터 정보 가져오기 (제목 기반)
   const getCurrentChapterInfo = () => {
@@ -1557,10 +1563,10 @@ const ReactReaderRenderer = forwardRef(({
             // 실제 content 파일들만 필터링 (HTML/XHTML 파일)
             const contentSpineItems = allSpineItems.filter(item => {
               const href = item.href || '';
-              const isContent = href.includes('.html') || href.includes('.xhtml') || 
-                               href.includes('chapter') || href.includes('part') ||
-                               !href.includes('.css') && !href.includes('.jpg') && 
-                               !href.includes('.png') && !href.includes('.svg');
+                          const isContent = href.includes('.html') || href.includes('.xhtml') || 
+                             href.includes('chapter') || href.includes('part') ||
+                             (!href.includes('.css') && !href.includes('.jpg') && 
+                             !href.includes('.png') && !href.includes('.svg'));
               return isContent;
             });
             
@@ -1827,7 +1833,7 @@ const ReactReaderRenderer = forwardRef(({
             if (error?.message && (
               error.message.includes('package') ||
               error.message.includes('Cannot read properties of undefined') ||
-              error.message.includes('undefined') && error.message.includes('reading')
+              (error.message.includes('undefined') && error.message.includes('reading'))
             )) {
               console.error('📦 EPUB 구조 분석 실패 - 자동 폴백');
               setError('EPUB 파일 구조 분석 중 오류가 발생했습니다. 파일이 손상되었거나 표준에 맞지 않을 수 있습니다.');

@@ -195,7 +195,7 @@ const ReaderView = () => {
   const [bookChapters, setBookChapters] = useState([]);
   
   // 북마크 관련 상태
-  const [currentLocation, setCurrentLocation] = useState(null);
+  // const [currentLocation, setCurrentLocation] = useState(null);
   const [lastLocation, setLastLocation] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(100); // EPUB은 진행률 기반으로 100페이지로 설정
@@ -379,7 +379,7 @@ const ReaderView = () => {
   // CFI 기반 위치 변경 핸들러 (북마크 자동 저장)
   const handleLocationChange = useCallback((locationData) => {
     const { location, href, title } = locationData;
-    setCurrentLocation(location);
+    // setCurrentLocation(location);
     
     // CFI 기반 북마크 저장 (디바운스)
     const saveBookmarkDebounced = setTimeout(async () => {
