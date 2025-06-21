@@ -20,23 +20,43 @@ code {
 }
 
 .highlight-yellow {
-  background-color: #ffeb3b;
+  background-color: #fff9c4;
+  color: #5d4e00;
   padding: 2px 4px;
-  border-radius: 2px;
+  border-radius: 3px;
 }
 
 .highlight-blue {
-  background-color: #2196f3;
-  color: white;
+  background-color: #bbdefb;
+  color: #0d47a1;
   padding: 2px 4px;
-  border-radius: 2px;
+  border-radius: 3px;
 }
 
 .highlight-green {
-  background-color: #4caf50;
-  color: white;
+  background-color: #c8e6c9;
+  color: #1b5e20;
   padding: 2px 4px;
-  border-radius: 2px;
+  border-radius: 3px;
+}
+
+.highlight-pink {
+  background-color: #f8bbd9;
+  color: #880e4f;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.highlight-purple {
+  background-color: #e1bee7;
+  color: #4a148c;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.highlight-underline {
+  border-bottom: 3px solid #666;
+  padding: 2px 4px;
 }
 
 .selection-popup {

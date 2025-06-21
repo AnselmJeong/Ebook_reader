@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { FiArrowLeft, FiSettings, FiMessageSquare, FiBookmark } from 'react-icons/fi';
+import { FiArrowLeft, FiSettings, FiMessageSquare, FiBookmark, FiEdit3 } from 'react-icons/fi';
 import { useBooks } from '../../context/BookContext';
 import TableOfContents from './TableOfContents';
 import ReadingSettings from './ReadingSettings';
@@ -10,6 +10,7 @@ import TextRenderer from './TextRenderer';
 import ReactReaderRenderer from './ReactReaderRenderer';
 import AIChat from './AIChat';
 import LoadingSpinner from './LoadingSpinner';
+import HighlightList from './HighlightList';
 
 const Container = styled.div`
   width: 100%;
@@ -173,6 +174,7 @@ const ReaderView = () => {
   const [showTOC, setShowTOC] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [showHighlights, setShowHighlights] = useState(false);
   const [chatSidebarWidth, setChatSidebarWidth] = useState(600);
   const [isResizing, setIsResizing] = useState(false);
   
@@ -441,6 +443,42 @@ const ReaderView = () => {
     }
   };
 
+  // 하이라이트 클릭 핸들러
+  const handleHighlightClick = (highlight) => {
+    console.log('🎯 하이라이트 클릭:', highlight);
+    
+    // 하이라이트된 위치로 이동 (우선순위: CFI > 챕터 번호 > 페이지 번호)
+    if (highlight.cfi && reactReaderRef.current) {
+      try {
+        // CFI로 정확한 위치 이동 (가장 정확함)
+        console.log('📍 CFI로 이동:', highlight.cfi);
+        const rendition = reactReaderRef.current.getRendition?.();
+        if (rendition && rendition.display) {
+          rendition.display(highlight.cfi);
+        }
+      } catch (error) {
+        console.warn('⚠️ CFI 이동 실패, 챕터로 이동 시도:', error);
+        // CFI 이동 실패 시 챕터 번호로 이동
+        if (highlight.chapterNumber) {
+          handlePageChange({ type: 'chapter', chapterIndex: highlight.chapterNumber - 1 });
+        } else if (highlight.pageNumber) {
+          handlePageChange(highlight.pageNumber);
+        }
+      }
+    } else if (highlight.chapterNumber) {
+      // 챕터 번호로 이동
+      console.log('📖 챕터로 이동:', highlight.chapterNumber);
+      handlePageChange({ type: 'chapter', chapterIndex: highlight.chapterNumber - 1 });
+    } else if (highlight.pageNumber) {
+      // 페이지 번호로 이동 (폴백)
+      console.log('📄 페이지로 이동:', highlight.pageNumber);
+      handlePageChange(highlight.pageNumber);
+    }
+    
+    // 하이라이트 목록 닫기
+    setShowHighlights(false);
+  };
+
   // 사이드바 리사이징 핸들러
   const handleResizeStart = (e) => {
     setIsResizing(true);
@@ -497,13 +535,20 @@ const ReaderView = () => {
 
   return (
     <Container>
-      <Sidebar isOpen={showTOC}>
-        {book && (
+      <Sidebar isOpen={showTOC || showHighlights}>
+        {book && showTOC && (
           <TableOfContents
             book={book}
             onPageChange={handlePageChange}
             onClose={() => setShowTOC(false)}
             chapters={bookChapters}
+          />
+        )}
+        {book && showHighlights && (
+          <HighlightList
+            book={book}
+            onClose={() => setShowHighlights(false)}
+            onHighlightClick={handleHighlightClick}
           />
         )}
       </Sidebar>
@@ -542,6 +587,14 @@ const ReaderView = () => {
               <FiMessageSquare size={18} />
             </HeaderButton>
             
+            <HeaderButton
+              active={showHighlights}
+              onClick={() => setShowHighlights(!showHighlights)}
+              title="하이라이트 목록"
+            >
+              <FiEdit3 size={18} />
+            </HeaderButton>
+            
 
           </HeaderRight>
         </Header>
@@ -563,6 +616,7 @@ const ReaderView = () => {
                 initialLocation={lastLocation}
                 currentPage={currentPage}
                 totalPages={totalPages}
+                bookChapters={bookChapters}
               />
             ) : (
               <TextRenderer

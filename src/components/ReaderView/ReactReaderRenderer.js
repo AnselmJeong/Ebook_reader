@@ -1,9 +1,10 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle, useCallback, useRef } from 'react';
 import { ReactReader } from 'react-reader';
-import { FiRefreshCw, FiAlertCircle, FiMessageCircle } from 'react-icons/fi';
+import { FiRefreshCw, FiAlertCircle, FiMessageCircle, FiEdit3 } from 'react-icons/fi';
 import styled from 'styled-components';
 import { EpubAnalyzer } from '../../utils/EpubAnalyzer';
 import { useChat } from '../../context/ChatContext';
+import { useHighlights } from '../../context/HighlightContext';
 
 // 컨텍스트 메뉴 스타일드 컴포넌트
 const ContextMenu = styled.div`
@@ -36,6 +37,44 @@ const ContextMenuItem = styled.button`
   }
 `;
 
+const HighlightSubmenu = styled.div`
+  position: absolute;
+  top: 0;
+  left: 100%;
+  background: ${props => props.theme === 'dark' ? '#2a2a2a' : '#ffffff'};
+  border: 1px solid ${props => props.theme === 'dark' ? '#555' : '#e0e0e0'};
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  min-width: 120px;
+  z-index: 1001;
+`;
+
+const HighlightColorOption = styled.button`
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  &:hover {
+    background: ${props => props.theme === 'dark' ? '#3a3a3a' : '#f8f9fa'};
+  }
+`;
+
+const HighlightColorCircle = styled.div`
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: ${props => props.color};
+  border: 2px solid ${props => props.theme === 'dark' ? '#555' : '#ddd'};
+`;
+
 const ReactReaderRenderer = forwardRef(({ 
   book, 
   settings, 
@@ -48,7 +87,8 @@ const ReactReaderRenderer = forwardRef(({
   onLocationChange,
   onPageChangeInternal,
   initialLocation,
-  totalPages
+  totalPages,
+  bookChapters
 }, ref) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -59,9 +99,22 @@ const ReactReaderRenderer = forwardRef(({
   const renditionRef = useRef(null);
 
   const [contextMenu, setContextMenu] = useState(null);
+  const [showHighlightSubmenu, setShowHighlightSubmenu] = useState(false);
 
   // AI 채팅 훅
   const { startChat } = useChat();
+  
+  // Highlight 훅
+  const { addHighlight, getHighlightsByPage, getHighlights } = useHighlights();
+  
+  // 하이라이트 색상 옵션 (파스텔 톤)
+  const highlightColors = [
+    { name: '노랑', color: '#fff9c4', className: 'highlight-yellow' },
+    { name: '초록', color: '#c8e6c9', className: 'highlight-green' },
+    { name: '파랑', color: '#bbdefb', className: 'highlight-blue' },
+    { name: '분홍', color: '#f8bbd9', className: 'highlight-pink' },
+    { name: '보라', color: '#e1bee7', className: 'highlight-purple' }
+  ];
 
   // 설정 적용 함수 - 직접 iframe 조작
   const applySettings = useCallback((rendition, currentSettings) => {
@@ -203,6 +256,7 @@ const ReactReaderRenderer = forwardRef(({
       // 컨텍스트 메뉴 밖을 클릭하면 메뉴 닫기
       if (contextMenu && !e.target.closest('[data-context-menu]')) {
         setContextMenu(null);
+        setShowHighlightSubmenu(false);
       }
     };
 
@@ -212,6 +266,26 @@ const ReactReaderRenderer = forwardRef(({
       document.removeEventListener('click', handleClick);
     };
   }, [contextMenu]);
+
+  // 컴포넌트 마운트 시 전역 에러 핸들러 추가
+  useEffect(() => {
+    const handleUnhandledError = (event) => {
+      if (event.error?.message?.includes('package') || 
+          event.error?.message?.includes('Cannot read properties of undefined')) {
+        console.error('📦 전역 EPUB 파싱 에러 감지:', event.error);
+        event.preventDefault();
+        if (onError) {
+          onError(new Error('전역 EPUB 파싱 에러 - SimpleRenderer로 전환'));
+        }
+      }
+    };
+
+    window.addEventListener('error', handleUnhandledError);
+    
+    return () => {
+      window.removeEventListener('error', handleUnhandledError);
+    };
+  }, [onError]);
 
   // initialLocation 변경 감지 및 로깅
   useEffect(() => {
@@ -886,12 +960,14 @@ const ReactReaderRenderer = forwardRef(({
             applySettings(rendition, settings);
           }
           
-          // 추가 보험용 재적용
+          // 추가 보험용 재적용 및 하이라이트 복원
           setTimeout(() => {
             if (!isUnmountingRef.current && rendition && settings) {
               applySettings(rendition, settings);
+              // 하이라이트 복원
+              restoreHighlights();
             }
-          }, 5); // 100ms → 5ms로 대폭 단축
+          }, 100); // 하이라이트 복원을 위해 시간을 조금 늘림
         });
 
         // 페이지 변경 시 즉시 설정 재적용 (깜빡임 방지)
@@ -905,12 +981,14 @@ const ReactReaderRenderer = forwardRef(({
             applySettings(rendition, settings);
           }
           
-          // 추가 보험용 재적용 (미세한 지연)
+          // 추가 보험용 재적용 및 하이라이트 복원 (미세한 지연)
           setTimeout(() => {
             if (!isUnmountingRef.current && rendition && settings) {
               applySettings(rendition, settings);
+              // 페이지 이동 시 하이라이트 복원
+              restoreHighlights();
             }
-          }, 10); // 100ms → 10ms로 단축
+          }, 100); // 하이라이트 복원을 위해 시간을 조금 늘림
         });
 
         rendition.on('resized', () => {
@@ -928,14 +1006,25 @@ const ReactReaderRenderer = forwardRef(({
 
         rendition.on('error', (err) => {
           console.error('❌ 렌디션 에러:', err);
+          console.error('❌ 렌디션 에러 세부정보:', {
+            message: err?.message,
+            name: err?.name,
+            stack: err?.stack
+          });
           
-          // package 관련 오류인지 확인
-          if (err.message && err.message.includes('package')) {
-            console.error('📦 EPUB package 파싱 오류 - SimpleRenderer로 자동 전환');
+          // package 관련 오류들 포괄적으로 확인
+          if (err?.message && (
+            err.message.includes('package') ||
+            err.message.includes('Cannot read properties of undefined') ||
+            err.message.includes('undefined') && err.message.includes('reading') ||
+            err.message.includes('parsing') ||
+            err.message.includes('spine')
+          )) {
+            console.error('📦 EPUB 구조 분석 오류 - SimpleRenderer로 자동 전환');
             
             // 자동으로 SimpleRenderer로 전환
             if (onError) {
-              onError(new Error('ReactReader에서 EPUB 구조 분석 실패 - SimpleRenderer로 전환합니다.'));
+              onError(new Error('ReactReader 렌디션 EPUB 파싱 실패 - SimpleRenderer로 전환'));
             }
           } else {
             handleReaderError(err);
@@ -1016,6 +1105,11 @@ const ReactReaderRenderer = forwardRef(({
       iframeDoc.addEventListener('contextmenu', handleIframeContextMenu);
       iframeDoc.addEventListener('click', handleIframeClick);
       
+      // 하이라이트 CSS 주입 및 기존 하이라이트 복원
+      injectHighlightStyles(iframeDoc);
+      setTimeout(() => {
+        restoreHighlights();
+      }, 100); // 페이지 로드 완료 후 하이라이트 복원
 
     } catch (error) {
       console.error('❌ iframe 텍스트 선택 이벤트 추가 실패:', error);
@@ -1027,26 +1121,353 @@ const ReactReaderRenderer = forwardRef(({
   // AI 채팅 시작 핸들러
   const handleStartAIChat = () => {
     if (contextMenu && contextMenu.text) {
+      // 현재 위치의 챕터 정보 가져오기
+      const chapterInfo = getCurrentChapterInfo();
+      
       startChat(
         book.id, 
         location || 1, 
-        contextMenu.text
+        contextMenu.text,
+        chapterInfo
       );
       
       if (onTextSelection) {
         onTextSelection(contextMenu.text, { 
           page: location || 1,
-          startChat: true // AI 채팅 시작 플래그
+          startChat: true, // AI 채팅 시작 플래그
+          chapterInfo: chapterInfo
         });
       }
       
       setContextMenu(null);
+      setShowHighlightSubmenu(false);
     }
   };
 
-  return (
-    <div style={{ height: '100%' }}>
-              <ReactReader
+  // CFI에서 spine index 추출
+  const getSpineIndexFromCFI = (cfi) => {
+    try {
+      if (!cfi) return null;
+      
+      // CFI 형식: epubcfi(/6/14[chapter-id]!/4/2/2[para-id]/1:0)
+      // spine index는 첫 번째 숫자에서 2를 빼고 2로 나눈 값
+      const match = cfi.match(/epubcfi\(\/(\d+)/);
+      if (match) {
+        const spineIndex = Math.floor((parseInt(match[1]) - 2) / 2);
+        return Math.max(0, spineIndex);
+      }
+      return null;
+    } catch (error) {
+      console.warn('⚠️ CFI에서 spine index 추출 실패:', error);
+      return null;
+    }
+  };
+
+  // spine index를 실제 챕터 번호로 매핑
+  const getChapterFromSpineIndex = (spineIndex, chapters) => {
+    try {
+      if (spineIndex === null || !chapters || chapters.length === 0) {
+        return 1;
+      }
+      
+      // spine index를 챕터 번호로 변환 (일반적으로 1:1 매핑이지만 안전하게 처리)
+      const chapterNumber = Math.min(spineIndex + 1, chapters.length);
+      return Math.max(1, chapterNumber);
+    } catch (error) {
+      console.warn('⚠️ spine index를 챕터로 변환 실패:', error);
+      return 1;
+    }
+  };
+
+  // 현재 위치의 챕터 정보 가져오기 (개선된 버전)
+  const getCurrentChapterInfo = () => {
+    try {
+      if (renditionRef.current && renditionRef.current.location) {
+        const currentLocation = renditionRef.current.location;
+        const progress = currentLocation.start?.percentage || 0;
+        const cfi = currentLocation.start?.cfi;
+        
+        // CFI에서 실제 spine index 추출
+        const spineIndex = getSpineIndexFromCFI(cfi);
+        
+        // spine index를 실제 챕터 번호로 변환
+        let actualChapter = 1;
+        if (spineIndex !== null) {
+          // bookChapters가 있으면 정확한 매핑, 없으면 spine index + 1
+          if (bookChapters && bookChapters.length > 0) {
+            actualChapter = getChapterFromSpineIndex(spineIndex, bookChapters);
+          } else {
+            actualChapter = spineIndex + 1;
+          }
+        } else {
+          // CFI 파싱 실패 시 진행률 기반 추정 (폴백)
+          const totalChapters = bookChapters?.length || 10;
+          actualChapter = Math.max(1, Math.ceil(progress * totalChapters));
+        }
+        
+        console.log(`📍 위치 정보: CFI=${cfi}, SpineIndex=${spineIndex}, Chapter=${actualChapter}, Progress=${Math.round(progress * 100)}%`);
+        
+        return {
+          chapter: actualChapter,
+          progress: Math.round(progress * 100),
+          cfi: cfi,
+          spineIndex: spineIndex
+        };
+      }
+    } catch (error) {
+      console.warn('⚠️ 챕터 정보 가져오기 실패:', error);
+    }
+    
+    return {
+      chapter: 1,
+      progress: 0,
+      cfi: null,
+      spineIndex: null
+    };
+  };
+
+  // 하이라이트 추가 핸들러
+  const handleAddHighlight = (color) => {
+    if (contextMenu && contextMenu.text) {
+      // 현재 정확한 위치 정보 가져오기
+      const chapterInfo = getCurrentChapterInfo();
+      
+      // 하이라이트 데이터 생성 (정확한 위치 정보 포함)
+      const highlight = {
+        text: contextMenu.text,
+        pageNumber: location || 1, // 기존 호환성을 위해 유지
+        chapterNumber: chapterInfo.chapter, // 실제 챕터 번호
+        progress: chapterInfo.progress, // 정확한 진행률
+        cfi: chapterInfo.cfi, // CFI 위치 정보
+        spineIndex: chapterInfo.spineIndex, // spine index
+        color: color.color,
+        className: color.className,
+        position: {
+          x: contextMenu.x,
+          y: contextMenu.y
+        }
+      };
+
+      console.log('💾 하이라이트 저장:', {
+        text: highlight.text.substring(0, 50) + '...',
+        chapter: highlight.chapterNumber,
+        progress: `${highlight.progress}%`,
+        cfi: highlight.cfi
+      });
+
+      // 하이라이트 저장
+      addHighlight(book.id, highlight);
+
+      // 실제 텍스트에 하이라이트 적용 (iframe 내부 조작)
+      applyHighlightToText(contextMenu.text, color.className);
+      
+      setContextMenu(null);
+      setShowHighlightSubmenu(false);
+    }
+  };
+
+  // iframe 내부에 하이라이트 CSS 주입
+  const injectHighlightStyles = (iframeDoc) => {
+    // 이미 스타일이 주입되었는지 확인
+    if (iframeDoc.getElementById('highlight-styles')) return;
+
+    const style = iframeDoc.createElement('style');
+    style.id = 'highlight-styles';
+    style.textContent = `
+      .highlight-yellow {
+        background-color: #fff9c4 !important;
+        color: #5d4e00 !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-blue {
+        background-color: #bbdefb !important;
+        color: #0d47a1 !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-green {
+        background-color: #c8e6c9 !important;
+        color: #1b5e20 !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-pink {
+        background-color: #f8bbd9 !important;
+        color: #880e4f !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-purple {
+        background-color: #e1bee7 !important;
+        color: #4a148c !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-underline {
+        border-bottom: 3px solid #666 !important;
+        padding: 2px 4px !important;
+      }
+    `;
+    
+    iframeDoc.head.appendChild(style);
+    console.log('✅ iframe에 하이라이트 CSS 주입 완료');
+  };
+
+  // iframe 내부 텍스트에 하이라이트 적용
+  const applyHighlightToText = (selectedText, className) => {
+    try {
+      const iframe = document.querySelector('#react-reader iframe') || 
+                    document.querySelector('iframe[src*="blob:"]') ||
+                    document.querySelector('iframe');
+      
+      if (!iframe) return;
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (!iframeDoc) return;
+
+      // 하이라이트 CSS 주입
+      injectHighlightStyles(iframeDoc);
+
+      // 현재 선택된 텍스트 범위 가져오기
+      const selection = iframeDoc.getSelection();
+      if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        
+        // 하이라이트 요소 생성
+        const highlightSpan = iframeDoc.createElement('span');
+        highlightSpan.className = className;
+        highlightSpan.setAttribute('data-highlight', 'true');
+        
+        try {
+          // 선택된 범위를 하이라이트 요소로 감싸기
+          range.surroundContents(highlightSpan);
+          
+          // 선택 해제
+          selection.removeAllRanges();
+          
+          console.log('✅ 하이라이트 적용 성공:', selectedText.substring(0, 50) + '...');
+        } catch (error) {
+          console.warn('⚠️ surroundContents 실패, extractContents 시도:', error);
+          
+          // 대안 방법: 범위의 내용을 추출하고 하이라이트 요소로 교체
+          const contents = range.extractContents();
+          highlightSpan.appendChild(contents);
+          range.insertNode(highlightSpan);
+          
+          selection.removeAllRanges();
+        }
+      }
+    } catch (error) {
+      console.error('❌ 하이라이트 적용 실패:', error);
+    }
+  };
+
+  // 저장된 하이라이트를 페이지에 복원
+  const restoreHighlights = () => {
+    try {
+      const iframe = document.querySelector('#react-reader iframe') || 
+                    document.querySelector('iframe[src*="blob:"]') ||
+                    document.querySelector('iframe');
+      
+      if (!iframe || !book?.id) return;
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (!iframeDoc) return;
+
+      // 하이라이트 CSS 주입
+      injectHighlightStyles(iframeDoc);
+
+      // 현재 위치의 하이라이트 가져오기 (챕터 기반)
+      const currentChapterInfo = getCurrentChapterInfo();
+      const pageHighlights = getHighlightsByPage(book.id, location || 1);
+      
+      // 추가로 현재 챕터의 하이라이트도 가져오기
+      const allHighlights = getHighlights ? getHighlights(book.id) : [];
+      const chapterHighlights = allHighlights.filter(h => 
+        h.chapterNumber === currentChapterInfo.chapter || h.pageNumber === (location || 1)
+      );
+      
+      const highlightsToRestore = chapterHighlights.length > 0 ? chapterHighlights : pageHighlights;
+      
+      console.log(`📚 챕터 ${currentChapterInfo.chapter} (페이지 ${location || 1})의 저장된 하이라이트 ${highlightsToRestore.length}개 복원 시작`);
+
+      highlightsToRestore.forEach(highlight => {
+        // 텍스트 찾기 (간단한 구현)
+        const walker = iframeDoc.createTreeWalker(
+          iframeDoc.body,
+          NodeFilter.SHOW_TEXT,
+          null,
+          false
+        );
+
+        const textNodes = [];
+        let node;
+        while (node = walker.nextNode()) {
+          textNodes.push(node);
+        }
+
+        // 하이라이트 텍스트와 일치하는 텍스트 노드 찾기
+        for (const textNode of textNodes) {
+          const text = textNode.textContent;
+          const highlightIndex = text.indexOf(highlight.text);
+          
+          if (highlightIndex !== -1) {
+            try {
+              // 범위 생성
+              const range = iframeDoc.createRange();
+              range.setStart(textNode, highlightIndex);
+              range.setEnd(textNode, highlightIndex + highlight.text.length);
+              
+              // 하이라이트 요소 생성
+              const highlightSpan = iframeDoc.createElement('span');
+              highlightSpan.className = highlight.className;
+              highlightSpan.setAttribute('data-highlight', 'true');
+              highlightSpan.setAttribute('data-highlight-id', highlight.id);
+              
+              // 범위를 하이라이트로 감싸기
+              range.surroundContents(highlightSpan);
+              
+              console.log('✅ 하이라이트 복원:', highlight.text.substring(0, 30) + '...');
+              break; // 첫 번째 일치만 처리
+            } catch (error) {
+              console.warn('⚠️ 하이라이트 복원 실패:', error);
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('❌ 하이라이트 복원 중 오류:', error);
+    }
+  };
+
+
+
+  // ReactReader 안전 렌더링 함수
+  const renderReactReader = () => {
+    try {
+      if (!finalUrl) {
+        return (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            height: '100%',
+            color: '#666',
+            fontSize: '1.1rem'
+          }}>
+            📚 EPUB 파일을 로드하는 중...
+          </div>
+        );
+      }
+
+             return (
+        <ReactReader
           key={`reader-${book?.id}-${initialLocation || 'start'}`}
           url={finalUrl}
           location={initialLocation}
@@ -1080,13 +1501,60 @@ const ReactReaderRenderer = forwardRef(({
           swipeable={false}
           onError={(error) => {
             console.error('📚 ReactReader 컴포넌트 에러:', error);
-            if (error.message && error.message.includes('package')) {
+            console.error('📚 에러 세부 정보:', {
+              message: error?.message,
+              name: error?.name,
+              stack: error?.stack
+            });
+            
+            // package 관련 에러들 포괄적으로 처리
+            if (error?.message && (
+              error.message.includes('package') ||
+              error.message.includes('Cannot read properties of undefined') ||
+              error.message.includes('undefined') && error.message.includes('reading')
+            )) {
+              console.error('📦 EPUB 구조 분석 실패 - 자동 폴백');
               setError('EPUB 파일 구조 분석 중 오류가 발생했습니다. 파일이 손상되었거나 표준에 맞지 않을 수 있습니다.');
+              
+              // 에러 전파하여 SimpleRenderer로 자동 전환
+              if (onError) {
+                onError(new Error('ReactReader EPUB 파싱 실패 - SimpleRenderer로 전환'));
+              }
             } else {
               handleReaderError(error);
             }
           }}
         />
+      );
+    } catch (error) {
+      console.error('📚 ReactReader 렌더링 중 예외 발생:', error);
+      if (error?.message && (
+        error.message.includes('package') ||
+        error.message.includes('Cannot read properties of undefined')
+      )) {
+        console.error('📦 렌더링 중 EPUB 파싱 에러');
+        if (onError) {
+          onError(new Error('렌더링 중 EPUB 파싱 실패 - SimpleRenderer로 전환'));
+        }
+      }
+      return (
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          height: '100%',
+          color: '#e74c3c',
+          fontSize: '1.1rem'
+        }}>
+          ⚠️ EPUB 렌더링 중 오류가 발생했습니다
+        </div>
+      );
+    }
+  };
+
+  return (
+    <div style={{ height: '100%' }}>
+      {renderReactReader()}
       
       {/* 컨텍스트 메뉴 */}
       {contextMenu && (
@@ -1104,6 +1572,55 @@ const ReactReaderRenderer = forwardRef(({
           >
             <FiMessageCircle />
             AI와 채팅하기
+          </ContextMenuItem>
+          
+          <ContextMenuItem
+            theme={settings?.theme}
+            onMouseEnter={() => setShowHighlightSubmenu(true)}
+            onMouseLeave={() => setShowHighlightSubmenu(false)}
+            style={{ position: 'relative' }}
+          >
+            <FiEdit3 size={16} />
+            하이라이트
+            
+            {showHighlightSubmenu && (
+              <HighlightSubmenu
+                theme={settings?.theme}
+                onMouseEnter={() => setShowHighlightSubmenu(true)}
+                onMouseLeave={() => setShowHighlightSubmenu(false)}
+              >
+                {highlightColors.map((color, index) => (
+                  <HighlightColorOption
+                    key={index}
+                    theme={settings?.theme}
+                    onClick={() => handleAddHighlight(color)}
+                  >
+                    <HighlightColorCircle
+                      color={color.color}
+                      theme={settings?.theme}
+                    />
+                    {color.name}
+                  </HighlightColorOption>
+                ))}
+                
+                <HighlightColorOption
+                  theme={settings?.theme}
+                  onClick={() => handleAddHighlight({ 
+                    name: '밑줄', 
+                    color: 'transparent', 
+                    className: 'highlight-underline' 
+                  })}
+                >
+                  <div style={{ 
+                    width: '16px', 
+                    height: '2px', 
+                    backgroundColor: settings?.theme === 'dark' ? '#e0e0e0' : '#333',
+                    borderRadius: '1px'
+                  }} />
+                  밑줄
+                </HighlightColorOption>
+              </HighlightSubmenu>
+            )}
           </ContextMenuItem>
         </ContextMenu>
       )}

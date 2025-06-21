@@ -180,13 +180,14 @@ export const ChatProvider = ({ children }) => {
     }
   };
 
-  const startChat = (bookId, pageNumber, selectedText) => {
+  const startChat = (bookId, pageNumber, selectedText, chapterInfo = null) => {
     const chatId = `${bookId}-${pageNumber}-${Date.now()}`;
     const newChat = {
       id: chatId,
       bookId,
       pageNumber,
       selectedText,
+      chapterInfo, // 챕터 정보 추가
       messages: [], // 빈 메시지 배열로 시작
       createdAt: new Date().toISOString()
     };
