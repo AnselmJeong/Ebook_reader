@@ -1,0 +1,17 @@
+{
+    "short_name": "E-Reader",
+    "name": "E-Reader Pro - AI 기반 전자책 리더",
+    "description": "AI 기능이 내장된 현대적인 E-Reader 애플리케이션",
+    "icons": [
+        {
+            "src": "favicon.ico",
+            "sizes": "64x64 32x32 24x24 16x16",
+            "type": "image/x-icon"
+        }
+    ],
+    "start_url": ".",
+    "display": "standalone",
+    "theme_color": "#4CAF50",
+    "background_color": "#ffffff",
+    "orientation": "any"
+}
