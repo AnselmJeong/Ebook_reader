@@ -87,38 +87,44 @@ const HighlightText = styled.div`
   margin-bottom: 8px;
   word-wrap: break-word;
   
-  // 하이라이트 색상 표시
+  // 하이라이트 색상 표시 (본문과 동일한 파스텔 톤)
   ${props => props.className === 'highlight-yellow' && `
-    background-color: #ffeb3b;
-    padding: 2px 4px;
-    border-radius: 2px;
+    background-color: #fff9c4;
+    color: #5d4e00;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid #f0e68c;
   `}
   ${props => props.className === 'highlight-green' && `
-    background-color: #4caf50;
-    color: white;
-    padding: 2px 4px;
-    border-radius: 2px;
+    background-color: #c8e6c9;
+    color: #1b5e20;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid #a5d6a7;
   `}
   ${props => props.className === 'highlight-blue' && `
-    background-color: #2196f3;
-    color: white;
-    padding: 2px 4px;
-    border-radius: 2px;
+    background-color: #bbdefb;
+    color: #0d47a1;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid #90caf9;
   `}
   ${props => props.className === 'highlight-pink' && `
-    background-color: #e91e63;
-    color: white;
-    padding: 2px 4px;
-    border-radius: 2px;
+    background-color: #f8bbd9;
+    color: #880e4f;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid #f48fb1;
   `}
   ${props => props.className === 'highlight-purple' && `
-    background-color: #9c27b0;
-    color: white;
-    padding: 2px 4px;
-    border-radius: 2px;
+    background-color: #e1bee7;
+    color: #4a148c;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid #ce93d8;
   `}
   ${props => props.className === 'highlight-underline' && `
-    border-bottom: 2px solid #333;
+    border-bottom: 3px solid #666;
     padding: 2px 4px;
   `}
 `;
@@ -328,7 +334,11 @@ const HighlightList = ({ book, onClose, onHighlightClick }) => {
                 <HighlightInfo>
                   <PageInfo>
                     <FiBookOpen size={12} />
-                    {highlight.chapterNumber ? (
+                    {highlight.locationDescription ? (
+                      highlight.locationDescription
+                    ) : highlight.chapterTitle && highlight.chapterTitle !== '알 수 없는 챕터' ? (
+                      `${highlight.chapterTitle}${highlight.progress ? ` (${highlight.progress}%)` : ''}`
+                    ) : highlight.chapterNumber ? (
                       `챕터 ${highlight.chapterNumber}${highlight.progress ? ` (${highlight.progress}%)` : ''}`
                     ) : (
                       `페이지 ${highlight.pageNumber}`

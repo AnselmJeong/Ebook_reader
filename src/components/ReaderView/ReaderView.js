@@ -443,40 +443,73 @@ const ReaderView = () => {
     }
   };
 
-  // 하이라이트 클릭 핸들러
-  const handleHighlightClick = (highlight) => {
-    console.log('🎯 하이라이트 클릭:', highlight);
+  // 북마크로 이동 핸들러 (하이라이트와 AI 채팅에서 공통 사용)
+  const handleGoToBookmark = (bookmarkData) => {
+    console.log('🔖 북마크로 이동:', bookmarkData);
     
-    // 하이라이트된 위치로 이동 (우선순위: CFI > 챕터 번호 > 페이지 번호)
-    if (highlight.cfi && reactReaderRef.current) {
+    if (reactReaderRef.current) {
       try {
-        // CFI로 정확한 위치 이동 (가장 정확함)
-        console.log('📍 CFI로 이동:', highlight.cfi);
-        const rendition = reactReaderRef.current.getRendition?.();
-        if (rendition && rendition.display) {
-          rendition.display(highlight.cfi);
+        if (bookmarkData.type === 'cfi' && bookmarkData.cfi) {
+          // CFI로 정확한 위치 이동
+          console.log('📍 CFI로 이동:', bookmarkData.cfi);
+          
+          if (reactReaderRef.current.goToCfi) {
+            reactReaderRef.current.goToCfi(bookmarkData.cfi);
+          } else {
+            const rendition = reactReaderRef.current.getRendition?.();
+            if (rendition && rendition.display) {
+              rendition.display(bookmarkData.cfi);
+            }
+          }
+          
+          console.log('✅ CFI 이동 완료');
+          
+        } else if (bookmarkData.type === 'progress' && bookmarkData.progress !== undefined) {
+          // 진행률로 이동
+          const progressDecimal = bookmarkData.progress / 100;
+          console.log('📊 진행률로 이동:', bookmarkData.progress + '%');
+          
+          const rendition = reactReaderRef.current.getRendition?.();
+          if (rendition && rendition.book && rendition.book.locations) {
+            const location = rendition.book.locations.cfiFromPercentage(progressDecimal);
+            rendition.display(location);
+          }
         }
+        
+        // 이동 후 하이라이트 복원
+        setTimeout(() => {
+          if (reactReaderRef.current?.restoreHighlights) {
+            reactReaderRef.current.restoreHighlights();
+          }
+        }, 500);
+        
       } catch (error) {
-        console.warn('⚠️ CFI 이동 실패, 챕터로 이동 시도:', error);
-        // CFI 이동 실패 시 챕터 번호로 이동
-        if (highlight.chapterNumber) {
-          handlePageChange({ type: 'chapter', chapterIndex: highlight.chapterNumber - 1 });
-        } else if (highlight.pageNumber) {
-          handlePageChange(highlight.pageNumber);
-        }
+        console.warn('⚠️ 북마크 이동 실패:', error);
       }
-    } else if (highlight.chapterNumber) {
-      // 챕터 번호로 이동
-      console.log('📖 챕터로 이동:', highlight.chapterNumber);
-      handlePageChange({ type: 'chapter', chapterIndex: highlight.chapterNumber - 1 });
-    } else if (highlight.pageNumber) {
-      // 페이지 번호로 이동 (폴백)
-      console.log('📄 페이지로 이동:', highlight.pageNumber);
-      handlePageChange(highlight.pageNumber);
+    }
+  };
+
+  // 하이라이트 클릭 핸들러 (북마크 이동)
+  const handleHighlightClick = (highlight) => {
+    console.log('🎯 하이라이트 북마크로 이동:', {
+      text: highlight.text.substring(0, 50) + '...',
+      cfi: highlight.bookmark?.cfi || highlight.cfi,
+      progress: highlight.progress
+    });
+    
+    // 북마크 정보로 정확한 위치 이동
+    const bookmarkCfi = highlight.bookmark?.cfi || highlight.cfi;
+    
+    if (bookmarkCfi) {
+      handleGoToBookmark({ type: 'cfi', cfi: bookmarkCfi });
+    } else if (highlight.progress) {
+      handleGoToBookmark({ type: 'progress', progress: highlight.progress });
+    } else {
+      console.warn('❌ 북마크 정보가 없습니다');
     }
     
-    // 하이라이트 목록 닫기
-    setShowHighlights(false);
+    // 하이라이트 목록은 열린 상태로 유지 (닫지 않음)
+    // setShowHighlights(false); // 이 줄을 제거하여 사이드바 유지
   };
 
   // 사이드바 리사이징 핸들러
@@ -572,6 +605,14 @@ const ReaderView = () => {
             </HeaderButton>
             
             <HeaderButton
+              active={showHighlights}
+              onClick={() => setShowHighlights(!showHighlights)}
+              title="하이라이트 목록"
+            >
+              <FiEdit3 size={18} />
+            </HeaderButton>
+            
+            <HeaderButton
               active={showSettings}
               onClick={() => setShowSettings(!showSettings)}
               title="읽기 설정"
@@ -585,14 +626,6 @@ const ReaderView = () => {
               title="AI 채팅"
             >
               <FiMessageSquare size={18} />
-            </HeaderButton>
-            
-            <HeaderButton
-              active={showHighlights}
-              onClick={() => setShowHighlights(!showHighlights)}
-              title="하이라이트 목록"
-            >
-              <FiEdit3 size={18} />
             </HeaderButton>
             
 
@@ -651,6 +684,7 @@ const ReaderView = () => {
             <AIChat
               book={book}
               onClose={() => setShowChat(false)}
+              onGoToBookmark={handleGoToBookmark}
             />
           </ChatSidebar>
         </ReadingArea>

@@ -654,11 +654,158 @@ const ReactReaderRenderer = forwardRef(({
     return false;
   }, []);
 
+  // iframe 내부에 하이라이트 CSS 주입
+  const injectHighlightStyles = useCallback((iframeDoc) => {
+    // 이미 스타일이 주입되었는지 확인
+    if (iframeDoc.getElementById('highlight-styles')) return;
+
+    const style = iframeDoc.createElement('style');
+    style.id = 'highlight-styles';
+    style.textContent = `
+      .highlight-yellow {
+        background-color: #fff9c4 !important;
+        color: #5d4e00 !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-blue {
+        background-color: #bbdefb !important;
+        color: #0d47a1 !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-green {
+        background-color: #c8e6c9 !important;
+        color: #1b5e20 !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-pink {
+        background-color: #f8bbd9 !important;
+        color: #880e4f !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-purple {
+        background-color: #e1bee7 !important;
+        color: #4a148c !important;
+        padding: 2px 4px !important;
+        border-radius: 3px !important;
+      }
+      
+      .highlight-underline {
+        border-bottom: 3px solid #666 !important;
+        padding: 2px 4px !important;
+      }
+    `;
+    
+    iframeDoc.head.appendChild(style);
+    console.log('✅ iframe에 하이라이트 CSS 주입 완료');
+  }, []);
+
+  // 저장된 하이라이트를 페이지에 복원하는 함수
+  const restoreHighlightsFunc = useCallback(() => {
+    try {
+      const iframe = document.querySelector('#react-reader iframe') || 
+                    document.querySelector('iframe[src*="blob:"]') ||
+                    document.querySelector('iframe');
+      
+      if (!iframe || !book?.id) return;
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (!iframeDoc) return;
+
+      // 하이라이트 CSS 주입
+      injectHighlightStyles(iframeDoc);
+
+      // 현재 위치의 하이라이트 가져오기 (CFI 기반)
+      const allHighlights = getHighlights ? getHighlights(book.id) : [];
+      const currentLocation = renditionRef.current?.location;
+      
+      console.log(`📚 현재 위치의 저장된 하이라이트 ${allHighlights.length}개 복원 시작`);
+
+      allHighlights.forEach(highlight => {
+        // CFI 기반 하이라이트 복원은 복잡하므로 간단한 텍스트 매칭 사용
+        const walker = iframeDoc.createTreeWalker(
+          iframeDoc.body,
+          NodeFilter.SHOW_TEXT,
+          null,
+          false
+        );
+
+        const textNodes = [];
+        let node;
+        while (node = walker.nextNode()) {
+          textNodes.push(node);
+        }
+
+        // 하이라이트 텍스트와 일치하는 텍스트 노드 찾기
+        for (const textNode of textNodes) {
+          const text = textNode.textContent;
+          const highlightIndex = text.indexOf(highlight.text);
+          
+          if (highlightIndex !== -1) {
+            try {
+              // 범위 생성
+              const range = iframeDoc.createRange();
+              range.setStart(textNode, highlightIndex);
+              range.setEnd(textNode, highlightIndex + highlight.text.length);
+              
+              // 하이라이트 요소 생성
+              const highlightSpan = iframeDoc.createElement('span');
+              highlightSpan.className = highlight.className;
+              highlightSpan.setAttribute('data-highlight', 'true');
+              highlightSpan.setAttribute('data-highlight-id', highlight.id);
+              
+              // 범위를 하이라이트로 감싸기
+              range.surroundContents(highlightSpan);
+              
+              console.log('✅ 하이라이트 복원:', highlight.text.substring(0, 30) + '...');
+              break; // 첫 번째 일치만 처리
+            } catch (error) {
+              console.warn('⚠️ 하이라이트 복원 실패:', error);
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('❌ 하이라이트 복원 중 오류:', error);
+    }
+  }, [book?.id, getHighlights, injectHighlightStyles]);
+
   // 부모 컴포넌트에서 챕터 이동 함수에 접근할 수 있도록 노출
   useImperativeHandle(ref, () => ({
     goToChapter,
-    goToLocation
-  }), [goToChapter, goToLocation]);
+    goToLocation,
+    getRendition: () => renditionRef.current,
+    getCurrentPage: () => location,
+    getTotalPages: () => totalPages,
+    goToCfi: (cfi) => {
+      try {
+        if (renditionRef.current && renditionRef.current.display) {
+          console.log('🎯 CFI 이동 실행:', cfi);
+          renditionRef.current.display(cfi);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error('❌ CFI 이동 실패:', error);
+        return false;
+      }
+    },
+    restoreHighlights: () => {
+      try {
+        restoreHighlightsFunc();
+        console.log('🎨 하이라이트 복원 완료');
+      } catch (error) {
+        console.warn('⚠️ 하이라이트 복원 실패:', error);
+      }
+    }
+  }), [goToChapter, goToLocation, restoreHighlightsFunc]);
 
   // 목차 변경 핸들러 (useCallback으로 메모이제이션) - 무한 루프 방지를 위해 ref 사용
   const lastTocRef = useRef(null);
@@ -965,7 +1112,7 @@ const ReactReaderRenderer = forwardRef(({
             if (!isUnmountingRef.current && rendition && settings) {
               applySettings(rendition, settings);
               // 하이라이트 복원
-              restoreHighlights();
+              restoreHighlightsFunc();
             }
           }, 100); // 하이라이트 복원을 위해 시간을 조금 늘림
         });
@@ -986,7 +1133,7 @@ const ReactReaderRenderer = forwardRef(({
             if (!isUnmountingRef.current && rendition && settings) {
               applySettings(rendition, settings);
               // 페이지 이동 시 하이라이트 복원
-              restoreHighlights();
+              restoreHighlightsFunc();
             }
           }, 100); // 하이라이트 복원을 위해 시간을 조금 늘림
         });
@@ -1108,7 +1255,7 @@ const ReactReaderRenderer = forwardRef(({
       // 하이라이트 CSS 주입 및 기존 하이라이트 복원
       injectHighlightStyles(iframeDoc);
       setTimeout(() => {
-        restoreHighlights();
+        restoreHighlightsFunc();
       }, 100); // 페이지 로드 완료 후 하이라이트 복원
 
     } catch (error) {
@@ -1121,21 +1268,58 @@ const ReactReaderRenderer = forwardRef(({
   // AI 채팅 시작 핸들러
   const handleStartAIChat = () => {
     if (contextMenu && contextMenu.text) {
-      // 현재 위치의 챕터 정보 가져오기
+      // 현재 정확한 위치 정보 가져오기 (CFI와 진행률만 사용)
+      const currentLocation = renditionRef.current?.location;
+      const progress = Math.round((currentLocation?.start?.percentage || 0) * 100);
+      const cfi = currentLocation?.start?.cfi;
+      
+      // 간단한 위치 설명 생성
+      let locationDescription = `${progress}% 지점`;
+      if (contextMenu.text && contextMenu.text.length > 20) {
+        const previewText = contextMenu.text.substring(0, 20) + '...';
+        locationDescription = `"${previewText}" 근처`;
+      }
+      
+      // 챕터 정보 (기존 방식 유지 - 호환성)
       const chapterInfo = getCurrentChapterInfo();
+      
+      // 북마크 정보 포함한 텍스트 선택 데이터 생성
+      const textSelectionData = {
+        text: contextMenu.text,
+        locationDescription: locationDescription,
+        progress: progress,
+        cfi: cfi, // 정확한 CFI 북마크
+        spineIndex: currentLocation?.start?.index,
+        // 북마크 정보
+        bookmark: {
+          cfi: cfi,
+          progress: progress,
+          spineIndex: currentLocation?.start?.index
+        },
+        // 기존 호환성
+        page: location || 1,
+        chapterInfo: chapterInfo
+      };
+      
+      console.log('💬 AI 채팅 시작 - 북마크 정보:', {
+        text: textSelectionData.text.substring(0, 50) + '...',
+        locationDescription: textSelectionData.locationDescription,
+        cfi: textSelectionData.cfi,
+        progress: `${textSelectionData.progress}%`
+      });
       
       startChat(
         book.id, 
         location || 1, 
         contextMenu.text,
-        chapterInfo
+        chapterInfo,
+        textSelectionData // 북마크 정보 추가
       );
       
       if (onTextSelection) {
         onTextSelection(contextMenu.text, { 
-          page: location || 1,
-          startChat: true, // AI 채팅 시작 플래그
-          chapterInfo: chapterInfo
+          ...textSelectionData,
+          startChat: true // AI 채팅 시작 플래그
         });
       }
       
@@ -1144,22 +1328,81 @@ const ReactReaderRenderer = forwardRef(({
     }
   };
 
-  // CFI에서 spine index 추출
+  // CFI에서 spine index 추출 (개선된 버전)
   const getSpineIndexFromCFI = (cfi) => {
     try {
       if (!cfi) return null;
       
-      // CFI 형식: epubcfi(/6/14[chapter-id]!/4/2/2[para-id]/1:0)
-      // spine index는 첫 번째 숫자에서 2를 빼고 2로 나눈 값
-      const match = cfi.match(/epubcfi\(\/(\d+)/);
+      console.log('🔍 CFI 파싱 시도:', cfi);
+      
+      // CFI 형식 예시: epubcfi(/6/14[chapter-id]!/4/2/2[para-id]/1:0)
+      // 첫 번째 숫자(6)는 패키지 문서, 두 번째 숫자(14)가 spine item
+      
+      // 방법 1: 표준 EPUB CFI 파싱 - 두 번째 숫자 추출
+      let match = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
       if (match) {
-        const spineIndex = Math.floor((parseInt(match[1]) - 2) / 2);
+        const spineNumber = parseInt(match[1]);
+        console.log('📊 CFI spine 번호:', spineNumber);
+        
+        // EPUB CFI에서 spine index는 일반적으로 2부터 시작 (짝수)
+        // spine item 1 = CFI 2, spine item 2 = CFI 4, ...
+        const spineIndex = Math.floor((spineNumber - 2) / 2);
+        
+        console.log('🗂️ CFI 기반 spine index:', spineIndex);
         return Math.max(0, spineIndex);
       }
+      
+      // 방법 2: 첫 번째 숫자만 있는 경우
+      match = cfi.match(/epubcfi\(\/(\d+)/);
+      if (match) {
+        const firstNum = parseInt(match[1]);
+        console.log('📊 CFI 첫 번째 숫자:', firstNum);
+        
+        // 보수적 계산
+        const spineIndex = Math.max(0, Math.floor((firstNum - 2) / 2));
+        console.log('📍 보수적 spine index:', spineIndex);
+        return spineIndex;
+      }
+      
+      // 방법 3: 다른 CFI 패턴 (bracket 포함)
+      match = cfi.match(/\/(\d+)\[/);
+      if (match) {
+        const spineIndex = Math.max(0, parseInt(match[1]) - 2);
+        console.log('📍 대안 CFI 파싱 결과:', spineIndex);
+        return spineIndex;
+      }
+      
       return null;
     } catch (error) {
       console.warn('⚠️ CFI에서 spine index 추출 실패:', error);
       return null;
+    }
+  };
+
+  // 진행률로부터 챕터 추정 (TOC 기반)
+  const getChapterFromProgress = (progress, chapters) => {
+    try {
+      if (!chapters || chapters.length === 0) {
+        return Math.max(1, Math.ceil(progress * 15)); // 평균 15개 챕터 가정
+      }
+      
+      console.log('📚 TOC 기반 챕터 계산:', { progress, totalChapters: chapters.length });
+      
+      // 더 정확한 진행률 기반 챕터 추정
+      // 0% = 1장, 100% = 마지막 장
+      if (progress <= 0) {
+        return 1;
+      } else if (progress >= 1) {
+        return chapters.length;
+      } else {
+        // 진행률에 따른 선형 계산
+        const estimatedChapter = Math.max(1, Math.min(chapters.length, Math.round(progress * chapters.length)));
+        console.log('📖 진행률 기반 추정 챕터:', estimatedChapter, `(${Math.round(progress * 100)}%)`);
+        return estimatedChapter;
+      }
+    } catch (error) {
+      console.warn('⚠️ 진행률 기반 챕터 계산 실패:', error);
+      return 1;
     }
   };
 
@@ -1170,16 +1413,27 @@ const ReactReaderRenderer = forwardRef(({
         return 1;
       }
       
-      // spine index를 챕터 번호로 변환 (일반적으로 1:1 매핑이지만 안전하게 처리)
-      const chapterNumber = Math.min(spineIndex + 1, chapters.length);
-      return Math.max(1, chapterNumber);
+      console.log('🗂️ Spine index → 챕터 매핑:', { spineIndex, totalChapters: chapters.length });
+      
+      // spine index를 챕터 번호로 변환 (여러 방식 시도)
+      const method1 = Math.min(spineIndex + 1, chapters.length);  // 기본 방식
+      const method2 = Math.min(spineIndex, chapters.length);      // 0-based
+      const method3 = Math.min(spineIndex + 2, chapters.length);  // offset +2
+      
+      console.log('🔄 매핑 방식들:', { method1, method2, method3 });
+      
+      // 유효한 범위의 값 선택
+      const chapterNumber = Math.max(1, method1);
+      console.log('📍 최종 선택된 챕터:', chapterNumber);
+      
+      return chapterNumber;
     } catch (error) {
       console.warn('⚠️ spine index를 챕터로 변환 실패:', error);
       return 1;
     }
   };
 
-  // 현재 위치의 챕터 정보 가져오기 (개선된 버전)
+  // 현재 위치의 챕터 정보 가져오기 (제목 기반)
   const getCurrentChapterInfo = () => {
     try {
       if (renditionRef.current && renditionRef.current.location) {
@@ -1187,31 +1441,204 @@ const ReactReaderRenderer = forwardRef(({
         const progress = currentLocation.start?.percentage || 0;
         const cfi = currentLocation.start?.cfi;
         
-        // CFI에서 실제 spine index 추출
-        const spineIndex = getSpineIndexFromCFI(cfi);
+        // ReactReader의 실제 현재 spine item 정보 가져오기
+        const currentSpineItem = renditionRef.current.book?.spine?.get(currentLocation.start?.index);
+        const actualSpineIndex = currentLocation.start?.index;
         
-        // spine index를 실제 챕터 번호로 변환
-        let actualChapter = 1;
-        if (spineIndex !== null) {
-          // bookChapters가 있으면 정확한 매핑, 없으면 spine index + 1
-          if (bookChapters && bookChapters.length > 0) {
-            actualChapter = getChapterFromSpineIndex(spineIndex, bookChapters);
-          } else {
-            actualChapter = spineIndex + 1;
+        console.log('🎯 현재 위치 분석 시작:', { 
+          progress: `${Math.round(progress * 100)}%`, 
+          cfi,
+          actualSpineIndex: actualSpineIndex,
+          spineItemId: currentSpineItem?.idref,
+          spineItemHref: currentSpineItem?.href,
+          tocChapters: bookChapters?.length || 0,
+          tocSample: bookChapters?.slice(0, 3).map(ch => ch.title) || []
+        });
+        
+        // 현재 spine item의 href를 사용해서 TOC에서 실제 챕터 제목 찾기
+        let chapterTitle = null;
+        let chapterNumber = null;
+        
+        if (currentSpineItem?.href && bookChapters && bookChapters.length > 0) {
+          // href 기반으로 정확한 챕터 찾기
+          const currentHref = currentSpineItem.href;
+          console.log('🔍 현재 spine item:', {
+            href: currentHref,
+            idref: currentSpineItem.idref,
+            index: actualSpineIndex
+          });
+          
+          // TOC 전체 구조 출력
+          console.log('📚 전체 TOC 구조:');
+          bookChapters.forEach((chapter, index) => {
+            console.log(`  ${index}: "${chapter.title}" -> href: "${chapter.href}"`);
+          });
+          
+          // 여러 방식으로 매칭 시도
+          let matchedChapter = null;
+          let matchMethod = null;
+          
+          // 방법 1: 정확한 href 매칭
+          matchedChapter = bookChapters.find(chapter => 
+            chapter.href && chapter.href === currentHref
+          );
+          if (matchedChapter) matchMethod = '정확한 href 매칭';
+          
+          // 방법 2: href 파일명 매칭 (확장자 제외)
+          if (!matchedChapter) {
+            const currentFileName = currentHref.split('/').pop()?.split('#')[0];
+            console.log('🗂️ 현재 파일명:', currentFileName);
+            
+            matchedChapter = bookChapters.find(chapter => {
+              if (!chapter.href) return false;
+              const chapterFileName = chapter.href.split('/').pop()?.split('#')[0];
+              console.log(`  비교: "${currentFileName}" vs "${chapterFileName}"`);
+              return chapterFileName === currentFileName;
+            });
+            if (matchedChapter) matchMethod = '파일명 매칭';
           }
-        } else {
-          // CFI 파싱 실패 시 진행률 기반 추정 (폴백)
-          const totalChapters = bookChapters?.length || 10;
-          actualChapter = Math.max(1, Math.ceil(progress * totalChapters));
+          
+          // 방법 3: href 포함 관계 매칭
+          if (!matchedChapter) {
+            console.log('🔍 포함 관계 매칭 시도:');
+            matchedChapter = bookChapters.find(chapter => {
+              if (!chapter.href) return false;
+              const baseCurrentHref = currentHref.split('#')[0];
+              const baseChapterHref = chapter.href.split('#')[0];
+              
+              const includes1 = baseCurrentHref.includes(baseChapterHref);
+              const includes2 = baseChapterHref.includes(baseCurrentHref);
+              
+              console.log(`  "${baseCurrentHref}" includes "${baseChapterHref}": ${includes1}`);
+              console.log(`  "${baseChapterHref}" includes "${baseCurrentHref}": ${includes2}`);
+              
+              return includes1 || includes2;
+            });
+            if (matchedChapter) matchMethod = '포함 관계 매칭';
+          }
+          
+          // 방법 4: spine index 기반 직접 매핑 (디버깅용)
+          if (!matchedChapter && actualSpineIndex !== undefined) {
+            console.log('🎯 spine index 기반 직접 매핑 시도:');
+            console.log(`  spine index: ${actualSpineIndex}, TOC 길이: ${bookChapters.length}`);
+            
+            // 다양한 매핑 방식 시도
+            const candidates = [
+              { index: actualSpineIndex, name: 'spine index 그대로' },
+              { index: actualSpineIndex - 1, name: 'spine index - 1' },
+              { index: actualSpineIndex + 1, name: 'spine index + 1' },
+              { index: Math.floor(actualSpineIndex / 2), name: 'spine index / 2' }
+            ].filter(c => c.index >= 0 && c.index < bookChapters.length);
+            
+            candidates.forEach(candidate => {
+              const chapter = bookChapters[candidate.index];
+              console.log(`  ${candidate.name} (${candidate.index}): "${chapter.title}"`);
+            });
+          }
+          
+          if (matchedChapter) {
+            chapterTitle = matchedChapter.title;
+            chapterNumber = bookChapters.indexOf(matchedChapter) + 1;
+            console.log(`✅ 매칭 성공 (${matchMethod}):`, chapterTitle, '(번호:', chapterNumber, ')');
+          } else {
+            console.log('❌ 모든 매칭 방법 실패');
+          }
         }
         
-        console.log(`📍 위치 정보: CFI=${cfi}, SpineIndex=${spineIndex}, Chapter=${actualChapter}, Progress=${Math.round(progress * 100)}%`);
+        // 백업: spine에서 실제 content 파일들만 필터링해서 매핑
+        if (!chapterTitle && actualSpineIndex !== undefined && bookChapters && bookChapters.length > 0) {
+          console.log('🔄 spine 기반 smart 매핑 시도...');
+          
+          try {
+            // 전체 spine 정보 가져오기
+            const allSpineItems = renditionRef.current.book?.spine?.spineItems || [];
+            console.log(`📖 전체 spine items: ${allSpineItems.length}개`);
+            
+            // 실제 content 파일들만 필터링 (HTML/XHTML 파일)
+            const contentSpineItems = allSpineItems.filter(item => {
+              const href = item.href || '';
+              const isContent = href.includes('.html') || href.includes('.xhtml') || 
+                               href.includes('chapter') || href.includes('part') ||
+                               !href.includes('.css') && !href.includes('.jpg') && 
+                               !href.includes('.png') && !href.includes('.svg');
+              return isContent;
+            });
+            
+            console.log(`📝 content spine items: ${contentSpineItems.length}개`);
+            contentSpineItems.forEach((item, index) => {
+              console.log(`  ${index}: ${item.href} (idref: ${item.idref})`);
+            });
+            
+            // 현재 spine item이 content spine items에서 몇 번째인지 찾기
+            const currentContentIndex = contentSpineItems.findIndex(item => 
+              item.href === currentSpineItem.href || item.idref === currentSpineItem.idref
+            );
+            
+            console.log(`🎯 현재 content spine index: ${currentContentIndex}`);
+            
+            if (currentContentIndex >= 0 && currentContentIndex < bookChapters.length) {
+              const estimatedChapter = bookChapters[currentContentIndex];
+              chapterTitle = estimatedChapter.title;
+              chapterNumber = currentContentIndex + 1;
+              console.log('✅ content spine 매핑 성공:', chapterTitle);
+            } else {
+              // 비례 계산으로 매핑
+              const ratio = currentContentIndex / Math.max(contentSpineItems.length - 1, 1);
+              const estimatedIndex = Math.round(ratio * (bookChapters.length - 1));
+              const finalIndex = Math.max(0, Math.min(estimatedIndex, bookChapters.length - 1));
+              
+              const estimatedChapter = bookChapters[finalIndex];
+              chapterTitle = estimatedChapter.title;
+              chapterNumber = finalIndex + 1;
+              console.log(`📊 비례 계산 매핑 (${currentContentIndex}/${contentSpineItems.length} → ${finalIndex}/${bookChapters.length}):`, chapterTitle);
+            }
+            
+          } catch (error) {
+            console.warn('⚠️ smart 매핑 실패, 단순 추정 사용:', error);
+            
+            // 최종 백업: 단순 추정
+            const estimatedIndex = Math.min(
+              Math.floor(actualSpineIndex / 2), 
+              bookChapters.length - 1
+            );
+            const estimatedChapter = bookChapters[estimatedIndex];
+            if (estimatedChapter) {
+              chapterTitle = estimatedChapter.title;
+              chapterNumber = estimatedIndex + 1;
+              console.log('📍 단순 추정 챕터:', chapterTitle);
+            }
+          }
+        }
+        
+        // 최종 백업: 진행률 기반
+        if (!chapterTitle && bookChapters && bookChapters.length > 0) {
+          const estimatedIndex = Math.max(0, Math.min(
+            Math.round(progress * bookChapters.length) - 1, 
+            bookChapters.length - 1
+          ));
+          const estimatedChapter = bookChapters[estimatedIndex];
+          if (estimatedChapter) {
+            chapterTitle = estimatedChapter.title;
+            chapterNumber = estimatedIndex + 1;
+            console.log('📊 진행률 기반 추정 챕터:', chapterTitle);
+          }
+        }
+        
+        // 기본값
+        if (!chapterTitle) {
+          chapterTitle = '알 수 없는 챕터';
+          chapterNumber = 1;
+        }
+        
+        console.log(`🎯 최종 선택된 챕터: "${chapterTitle}" (진행률: ${Math.round(progress * 100)}%)`);
         
         return {
-          chapter: actualChapter,
+          chapterTitle: chapterTitle,
+          chapterNumber: chapterNumber,
           progress: Math.round(progress * 100),
           cfi: cfi,
-          spineIndex: spineIndex
+          spineIndex: actualSpineIndex,
+          spineItemHref: currentSpineItem?.href
         };
       }
     } catch (error) {
@@ -1219,7 +1646,8 @@ const ReactReaderRenderer = forwardRef(({
     }
     
     return {
-      chapter: 1,
+      chapterTitle: '알 수 없는 챕터',
+      chapterNumber: 1,
       progress: 0,
       cfi: null,
       spineIndex: null
@@ -1229,30 +1657,45 @@ const ReactReaderRenderer = forwardRef(({
   // 하이라이트 추가 핸들러
   const handleAddHighlight = (color) => {
     if (contextMenu && contextMenu.text) {
-      // 현재 정확한 위치 정보 가져오기
-      const chapterInfo = getCurrentChapterInfo();
+      // 현재 정확한 위치 정보 가져오기 (CFI와 진행률만 사용)
+      const currentLocation = renditionRef.current?.location;
+      const progress = Math.round((currentLocation?.start?.percentage || 0) * 100);
+      const cfi = currentLocation?.start?.cfi;
       
-      // 하이라이트 데이터 생성 (정확한 위치 정보 포함)
+      // 간단한 위치 설명 생성
+      let locationDescription = `${progress}% 지점`;
+      if (contextMenu.text && contextMenu.text.length > 20) {
+        const previewText = contextMenu.text.substring(0, 20) + '...';
+        locationDescription = `"${previewText}" 근처`;
+      }
+      
+      // 하이라이트 데이터 생성 (북마크 정보 포함)
       const highlight = {
         text: contextMenu.text,
-        pageNumber: location || 1, // 기존 호환성을 위해 유지
-        chapterNumber: chapterInfo.chapter, // 실제 챕터 번호
-        progress: chapterInfo.progress, // 정확한 진행률
-        cfi: chapterInfo.cfi, // CFI 위치 정보
-        spineIndex: chapterInfo.spineIndex, // spine index
+        pageNumber: location || 1, // 기존 호환성
+        locationDescription: locationDescription, // 위치 설명
+        progress: progress, // 진행률
+        cfi: cfi, // 정확한 CFI 북마크
+        spineIndex: currentLocation?.start?.index, // spine index
         color: color.color,
         className: color.className,
         position: {
           x: contextMenu.x,
           y: contextMenu.y
+        },
+        // 북마크 정보
+        bookmark: {
+          cfi: cfi,
+          progress: progress,
+          spineIndex: currentLocation?.start?.index
         }
       };
 
-      console.log('💾 하이라이트 저장:', {
+      console.log('💾 하이라이트 북마크 저장:', {
         text: highlight.text.substring(0, 50) + '...',
-        chapter: highlight.chapterNumber,
-        progress: `${highlight.progress}%`,
-        cfi: highlight.cfi
+        locationDescription: highlight.locationDescription,
+        cfi: highlight.cfi,
+        progress: `${highlight.progress}%`
       });
 
       // 하이라이트 저장
@@ -1266,58 +1709,7 @@ const ReactReaderRenderer = forwardRef(({
     }
   };
 
-  // iframe 내부에 하이라이트 CSS 주입
-  const injectHighlightStyles = (iframeDoc) => {
-    // 이미 스타일이 주입되었는지 확인
-    if (iframeDoc.getElementById('highlight-styles')) return;
 
-    const style = iframeDoc.createElement('style');
-    style.id = 'highlight-styles';
-    style.textContent = `
-      .highlight-yellow {
-        background-color: #fff9c4 !important;
-        color: #5d4e00 !important;
-        padding: 2px 4px !important;
-        border-radius: 3px !important;
-      }
-      
-      .highlight-blue {
-        background-color: #bbdefb !important;
-        color: #0d47a1 !important;
-        padding: 2px 4px !important;
-        border-radius: 3px !important;
-      }
-      
-      .highlight-green {
-        background-color: #c8e6c9 !important;
-        color: #1b5e20 !important;
-        padding: 2px 4px !important;
-        border-radius: 3px !important;
-      }
-      
-      .highlight-pink {
-        background-color: #f8bbd9 !important;
-        color: #880e4f !important;
-        padding: 2px 4px !important;
-        border-radius: 3px !important;
-      }
-      
-      .highlight-purple {
-        background-color: #e1bee7 !important;
-        color: #4a148c !important;
-        padding: 2px 4px !important;
-        border-radius: 3px !important;
-      }
-      
-      .highlight-underline {
-        border-bottom: 3px solid #666 !important;
-        padding: 2px 4px !important;
-      }
-    `;
-    
-    iframeDoc.head.appendChild(style);
-    console.log('✅ iframe에 하이라이트 CSS 주입 완료');
-  };
 
   // iframe 내부 텍스트에 하이라이트 적용
   const applyHighlightToText = (selectedText, className) => {
@@ -1368,83 +1760,7 @@ const ReactReaderRenderer = forwardRef(({
     }
   };
 
-  // 저장된 하이라이트를 페이지에 복원
-  const restoreHighlights = () => {
-    try {
-      const iframe = document.querySelector('#react-reader iframe') || 
-                    document.querySelector('iframe[src*="blob:"]') ||
-                    document.querySelector('iframe');
-      
-      if (!iframe || !book?.id) return;
 
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      if (!iframeDoc) return;
-
-      // 하이라이트 CSS 주입
-      injectHighlightStyles(iframeDoc);
-
-      // 현재 위치의 하이라이트 가져오기 (챕터 기반)
-      const currentChapterInfo = getCurrentChapterInfo();
-      const pageHighlights = getHighlightsByPage(book.id, location || 1);
-      
-      // 추가로 현재 챕터의 하이라이트도 가져오기
-      const allHighlights = getHighlights ? getHighlights(book.id) : [];
-      const chapterHighlights = allHighlights.filter(h => 
-        h.chapterNumber === currentChapterInfo.chapter || h.pageNumber === (location || 1)
-      );
-      
-      const highlightsToRestore = chapterHighlights.length > 0 ? chapterHighlights : pageHighlights;
-      
-      console.log(`📚 챕터 ${currentChapterInfo.chapter} (페이지 ${location || 1})의 저장된 하이라이트 ${highlightsToRestore.length}개 복원 시작`);
-
-      highlightsToRestore.forEach(highlight => {
-        // 텍스트 찾기 (간단한 구현)
-        const walker = iframeDoc.createTreeWalker(
-          iframeDoc.body,
-          NodeFilter.SHOW_TEXT,
-          null,
-          false
-        );
-
-        const textNodes = [];
-        let node;
-        while (node = walker.nextNode()) {
-          textNodes.push(node);
-        }
-
-        // 하이라이트 텍스트와 일치하는 텍스트 노드 찾기
-        for (const textNode of textNodes) {
-          const text = textNode.textContent;
-          const highlightIndex = text.indexOf(highlight.text);
-          
-          if (highlightIndex !== -1) {
-            try {
-              // 범위 생성
-              const range = iframeDoc.createRange();
-              range.setStart(textNode, highlightIndex);
-              range.setEnd(textNode, highlightIndex + highlight.text.length);
-              
-              // 하이라이트 요소 생성
-              const highlightSpan = iframeDoc.createElement('span');
-              highlightSpan.className = highlight.className;
-              highlightSpan.setAttribute('data-highlight', 'true');
-              highlightSpan.setAttribute('data-highlight-id', highlight.id);
-              
-              // 범위를 하이라이트로 감싸기
-              range.surroundContents(highlightSpan);
-              
-              console.log('✅ 하이라이트 복원:', highlight.text.substring(0, 30) + '...');
-              break; // 첫 번째 일치만 처리
-            } catch (error) {
-              console.warn('⚠️ 하이라이트 복원 실패:', error);
-            }
-          }
-        }
-      });
-    } catch (error) {
-      console.error('❌ 하이라이트 복원 중 오류:', error);
-    }
-  };
 
 
 

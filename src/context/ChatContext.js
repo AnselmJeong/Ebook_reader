@@ -180,17 +180,25 @@ export const ChatProvider = ({ children }) => {
     }
   };
 
-  const startChat = (bookId, pageNumber, selectedText, chapterInfo = null) => {
+  const startChat = (bookId, pageNumber, selectedText, chapterInfo = null, textSelectionData = null) => {
     const chatId = `${bookId}-${pageNumber}-${Date.now()}`;
     const newChat = {
       id: chatId,
       bookId,
       pageNumber,
       selectedText,
-      chapterInfo, // 챕터 정보 추가
+      chapterInfo, // 챕터 정보 추가 (기존 호환성)
+      textSelectionData, // 북마크 정보 포함한 텍스트 선택 데이터
       messages: [], // 빈 메시지 배열로 시작
       createdAt: new Date().toISOString()
     };
+
+    console.log('💾 새 채팅 생성 - 북마크 정보:', {
+      chatId,
+      locationDescription: textSelectionData?.locationDescription,
+      cfi: textSelectionData?.cfi,
+      progress: textSelectionData?.progress
+    });
 
     setChatHistory(prev => ({
       ...prev,

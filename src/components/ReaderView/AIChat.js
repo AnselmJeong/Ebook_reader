@@ -166,6 +166,20 @@ const SelectedText = styled.div`
   color: #333;
   font-style: italic;
   line-height: 1.4;
+  cursor: ${props => props.clickable ? 'pointer' : 'default'};
+  padding: ${props => props.clickable ? '8px 12px' : '0'};
+  border-radius: ${props => props.clickable ? '6px' : '0'};
+  background: ${props => props.clickable ? '#e3f2fd' : 'transparent'};
+  border: ${props => props.clickable ? '1px solid #bbdefb' : 'none'};
+  transition: all 0.2s ease;
+  
+  ${props => props.clickable && `
+    &:hover {
+      background: #bbdefb;
+      border-color: #90caf9;
+      transform: translateY(-1px);
+    }
+  `}
 `;
 
 const MessagesContainer = styled.div`
@@ -420,7 +434,7 @@ const renderMarkdown = (text) => {
   return html;
 };
 
-const AIChat = ({ book, currentPage, onClose }) => {
+const AIChat = ({ book, currentPage, onClose, onGoToBookmark }) => {
   const { 
     activeChat, 
     setActiveChat, 
@@ -518,6 +532,27 @@ const AIChat = ({ book, currentPage, onClose }) => {
     }
   };
 
+  // 북마크로 이동 (선택된 텍스트 클릭 시)
+  const handleGoToBookmark = () => {
+    if (activeChat?.textSelectionData?.bookmark && onGoToBookmark) {
+      const { cfi, progress, spineIndex } = activeChat.textSelectionData.bookmark;
+      
+      console.log('🔖 북마크로 이동:', {
+        cfi,
+        progress: `${progress}%`,
+        spineIndex,
+        text: activeChat.selectedText?.substring(0, 50) + '...'
+      });
+      
+      // CFI 우선, 없으면 진행률 사용
+      if (cfi) {
+        onGoToBookmark({ type: 'cfi', cfi });
+      } else if (progress !== undefined) {
+        onGoToBookmark({ type: 'progress', progress });
+      }
+    }
+  };
+
   if (showSettings) {
     return <AISettings onClose={() => setShowSettings(false)} />;
   }
@@ -568,17 +603,10 @@ const AIChat = ({ book, currentPage, onClose }) => {
                 >
                   <ChatItemHeader>
                     <ChatItemTitle>
-                      {chat.chapterInfo ? (
-                        `챕터 ${chat.chapterInfo.chapter} (${chat.chapterInfo.progress}%) - AI 채팅`
+                      {chat.textSelectionData?.locationDescription ? (
+                        `${chat.textSelectionData.locationDescription} - AI 채팅`
                       ) : (
-                        `페이지 ${(() => {
-                          if (typeof chat.pageNumber === 'number') {
-                            return chat.pageNumber;
-                          } else if (typeof chat.pageNumber === 'object' && chat.pageNumber?.currentPage) {
-                            return chat.pageNumber.currentPage;
-                          }
-                          return 1;
-                        })()} - AI 채팅`
+                        `AI 채팅`
                       )}
                     </ChatItemTitle>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -610,25 +638,39 @@ const AIChat = ({ book, currentPage, onClose }) => {
             >
               <FiMinimize2 size={16} />
             </HeaderButton>
-            <span style={{ marginLeft: '10px', fontSize: '0.9rem', color: '#666' }}>
-              {activeChat.chapterInfo ? (
-                `챕터 ${activeChat.chapterInfo.chapter} (${activeChat.chapterInfo.progress}%)`
-              ) : (
-                `페이지 ${(() => {
-                  if (typeof activeChat.pageNumber === 'number') {
-                    return activeChat.pageNumber;
-                  } else if (typeof activeChat.pageNumber === 'object' && activeChat.pageNumber?.currentPage) {
-                    return activeChat.pageNumber.currentPage;
-                  }
-                  return 1;
-                })()}`
-              )}
-            </span>
+            {activeChat.textSelectionData?.locationDescription && (
+              <span style={{ marginLeft: '10px', fontSize: '0.9rem', color: '#666' }}>
+                {activeChat.textSelectionData.locationDescription}
+              </span>
+            )}
           </div>
 
           <SelectedTextDisplay>
-            <SelectedTextLabel>선택된 텍스트:</SelectedTextLabel>
-            <SelectedText>"{activeChat.selectedText}"</SelectedText>
+            <SelectedTextLabel>
+              선택된 텍스트:
+              {activeChat?.textSelectionData?.bookmark?.cfi && (
+                <span style={{ fontSize: '0.7rem', color: '#4CAF50', marginLeft: '8px' }}>
+                  📍 클릭하여 원본 위치로 이동
+                </span>
+              )}
+            </SelectedTextLabel>
+            <SelectedText 
+              clickable={!!activeChat?.textSelectionData?.bookmark?.cfi}
+              onClick={activeChat?.textSelectionData?.bookmark?.cfi ? handleGoToBookmark : undefined}
+              title={activeChat?.textSelectionData?.bookmark?.cfi ? '클릭하여 원본 위치로 이동' : undefined}
+            >
+              "{activeChat.selectedText}"
+              {activeChat?.textSelectionData?.locationDescription && (
+                <div style={{ 
+                  fontSize: '0.75rem', 
+                  color: '#666', 
+                  marginTop: '4px',
+                  fontStyle: 'normal'
+                }}>
+                  위치: {activeChat.textSelectionData.locationDescription}
+                </div>
+              )}
+            </SelectedText>
           </SelectedTextDisplay>
 
           <MessagesContainer>
