@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import indexedDBStorage from '../utils/IndexedDBStorage';
+import { CoverExtractor } from '../utils/CoverExtractor';
+import { EpubMetadataExtractor } from '../utils/EpubMetadataExtractor';
 
 const BookContext = createContext();
 
@@ -26,8 +28,6 @@ export const BookProvider = ({ children }) => {
       console.error('저장 공간 사용량 조회 실패:', error);
     }
   }, []);
-
-
 
   // IndexedDB 초기화 및 데이터 로드 (한 번만 실행)
   useEffect(() => {
@@ -213,6 +213,34 @@ export const BookProvider = ({ children }) => {
         await indexedDBStorage.saveBook(completeBook);
         console.log('✅ IndexedDB 저장 완료 (메타데이터 + 파일 데이터)');
         
+        // 백그라운드에서 EPUB 표지 추출 (EPUB 파일인 경우에만)
+        if (book.type === 'epub') {
+          setTimeout(async () => {
+            try {
+              console.log('📸 백그라운드 표지 추출 시작:', newBook.title);
+              const coverImage = await CoverExtractor.extractCover(fileData);
+              
+              if (coverImage) {
+                // IndexedDB에 표지 이미지 저장
+                await indexedDBStorage.saveCoverImage(newBook.id, coverImage);
+                
+                // React 상태 업데이트
+                setBooks(prev => prev.map(b => 
+                  b.id === newBook.id 
+                    ? { ...b, coverImage } 
+                    : b
+                ));
+                
+                console.log('✅ 표지 이미지 추출 및 저장 완료');
+              } else {
+                console.log('⚠️ 표지 이미지를 찾을 수 없음');
+              }
+            } catch (coverError) {
+              console.warn('⚠️ 표지 추출 실패 (무시됨):', coverError.message);
+            }
+          }, 1000); // 1초 후 백그라운드에서 실행
+        }
+        
         // 저장 공간 사용량 업데이트
         await updateStorageUsage();
         
@@ -279,8 +307,26 @@ export const BookProvider = ({ children }) => {
     }
   }, [books]);
 
-  const getBookById = useCallback((bookId) => {
-    return books.find(book => book.id === bookId);
+  const getBookById = useCallback(async (bookId) => {
+    // 먼저 메모리에서 찾기
+    const memoryBook = books.find(book => book.id === bookId);
+    if (memoryBook) {
+      return memoryBook;
+    }
+    
+    // 메모리에 없으면 IndexedDB에서 직접 가져오기 (새로고침 시)
+    try {
+      console.log('🔄 메모리에 없음, IndexedDB에서 책 메타데이터 로드:', bookId);
+      const bookFromDB = await indexedDBStorage.getBook(bookId);
+      if (bookFromDB) {
+        console.log('✅ IndexedDB에서 책 메타데이터 발견:', bookFromDB.title);
+        return bookFromDB;
+      }
+    } catch (error) {
+      console.error('❌ IndexedDB에서 책 메타데이터 로드 실패:', error);
+    }
+    
+    return null;
   }, [books]);
 
   // IndexedDB에서 파일 데이터와 함께 책 정보 반환
@@ -297,34 +343,32 @@ export const BookProvider = ({ children }) => {
       
       console.log('📋 메타데이터 발견:', book.title);
       
-      // 2. IndexedDB에서 파일 데이터 로드
+      // 2. IndexedDB에서 파일 데이터 로드 (bookFiles 테이블에서)
       try {
         console.log('🗄️ IndexedDB에서 파일 데이터 로드 시도...');
-        const bookWithFileData = await indexedDBStorage.getBook(bookId);
+        const fileData = await indexedDBStorage.getBookFile(bookId);
         
-        if (bookWithFileData && bookWithFileData.fileData) {
+        if (fileData && fileData.fileData) {
           console.log('✅ IndexedDB에서 파일 데이터 발견');
-          console.log('📊 파일 크기:', bookWithFileData.fileData.length, '바이트');
+          console.log('📊 파일 데이터 타입:', typeof fileData.fileData);
+          console.log('📊 파일 크기:', fileData.fileData.byteLength || fileData.fileData.length || 'unknown');
           
           return {
             ...book,
-            fileData: bookWithFileData.fileData,
-            content: bookWithFileData.fileData
+            fileData: fileData.fileData
           };
         } else {
           console.warn('⚠️ IndexedDB에 파일 데이터 없음');
           return {
             ...book,
-            fileData: null,
-            content: null
+            fileData: null
           };
         }
       } catch (dbError) {
         console.error('❌ IndexedDB 오류:', dbError);
         return {
           ...book,
-          fileData: null,
-          content: null
+          fileData: null
         };
       }
     } catch (error) {
@@ -333,12 +377,39 @@ export const BookProvider = ({ children }) => {
     }
   }, [books]);
 
-  const updateProgress = useCallback(async (bookId, progress) => {
-    await updateBook(bookId, { 
-      progress, 
-      lastOpened: new Date().toISOString() 
-    });
-  }, [updateBook]);
+
+
+  // 북마크 저장 함수
+  const saveBookmark = useCallback(async (bookId, bookmarkData) => {
+    try {
+      await indexedDBStorage.saveBookmark(bookId, bookmarkData);
+      console.log(`🔖 북마크 저장 완료: ${bookId}`);
+    } catch (error) {
+      console.error('❌ 북마크 저장 실패:', error);
+      throw error;
+    }
+  }, []);
+
+  // 북마크 조회 함수
+  const getBookmark = useCallback(async (bookId) => {
+    try {
+      const bookmark = await indexedDBStorage.getBookmark(bookId);
+      return bookmark;
+    } catch (error) {
+      console.error('❌ 북마크 조회 실패:', error);
+      return null;
+    }
+  }, []);
+
+  // 모든 북마크 조회 함수
+  const getAllBookmarks = useCallback(async () => {
+    try {
+      return await indexedDBStorage.getAllBookmarks();
+    } catch (error) {
+      console.error('❌ 모든 북마크 조회 실패:', error);
+      return [];
+    }
+  }, []);
 
   const getMostPopular = useCallback(() => {
     return books
@@ -389,6 +460,186 @@ export const BookProvider = ({ children }) => {
     }
   }, []);
 
+  // 🔄 기존 책들의 표지 추출 함수
+  const extractCoverForExistingBooks = async () => {
+    try {
+      console.log('🔄 기존 책들의 표지 추출 시작...');
+      
+      // EPUB 파일이면서 표지가 없는 책들 찾기
+      const booksNeedingCovers = books.filter(book => 
+        book.type === 'epub' && !book.coverImage
+      );
+      
+      if (booksNeedingCovers.length === 0) {
+        console.log('✅ 표지 추출이 필요한 책이 없습니다.');
+        return;
+      }
+      
+      console.log(`📚 ${booksNeedingCovers.length}권의 책에서 표지 추출 시작...`);
+      
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const book of booksNeedingCovers) {
+        try {
+          console.log(`📖 "${book.title}" 표지 추출 중...`);
+          
+          // IndexedDB에서 파일 데이터 가져오기
+          const bookWithFile = await indexedDBStorage.getBook(book.id);
+          
+          if (!bookWithFile || !bookWithFile.fileData) {
+            console.warn(`⚠️ "${book.title}" 파일 데이터를 찾을 수 없음`);
+            failCount++;
+            continue;
+          }
+          
+          // 표지 추출
+          const coverImage = await CoverExtractor.extractCover(bookWithFile.fileData);
+          
+          if (coverImage) {
+            // IndexedDB에 표지 이미지 저장
+            await indexedDBStorage.saveCoverImage(book.id, coverImage);
+            
+            // React 상태 업데이트
+            setBooks(prev => prev.map(b => 
+              b.id === book.id 
+                ? { ...b, coverImage }
+                : b
+            ));
+            
+            console.log(`✅ "${book.title}" 표지 추출 완료`);
+            successCount++;
+          } else {
+            console.warn(`⚠️ "${book.title}" 표지를 찾을 수 없음`);
+            failCount++;
+          }
+          
+          // 다음 책 처리 전 잠시 대기 (UI 블로킹 방지)
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+        } catch (error) {
+          console.error(`❌ "${book.title}" 표지 추출 실패:`, error);
+          failCount++;
+        }
+      }
+      
+      console.log(`🎉 표지 추출 완료: 성공 ${successCount}권, 실패 ${failCount}권`);
+      
+      if (successCount > 0) {
+        // 저장 공간 사용량 업데이트
+        await updateStorageUsage();
+      }
+      
+    } catch (error) {
+      console.error('❌ 기존 책 표지 추출 중 오류:', error);
+    }
+  };
+
+
+
+  // 📋 기존 EPUB 책들의 메타데이터 업데이트 함수
+  const updateMetadataForExistingBooks = async () => {
+    try {
+      console.log('📋 기존 책들의 메타데이터 업데이트 시작...');
+      
+      // EPUB 파일이면서 메타데이터가 부족한 책들 찾기
+      const booksNeedingMetadata = books.filter(book => 
+        book.type === 'epub' && (
+          book.author === '알 수 없음' || 
+          !book.publisher || 
+          !book.language ||
+          !book.description
+        )
+      );
+      
+      if (booksNeedingMetadata.length === 0) {
+        console.log('✅ 메타데이터 업데이트가 필요한 책이 없습니다.');
+        return;
+      }
+      
+      console.log(`📚 ${booksNeedingMetadata.length}권의 책 메타데이터 업데이트 시작...`);
+      
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const book of booksNeedingMetadata) {
+        try {
+          console.log(`📋 "${book.title}" 메타데이터 추출 중...`);
+          
+          // IndexedDB에서 파일 데이터 가져오기
+          const bookWithFile = await indexedDBStorage.getBook(book.id);
+          
+          if (!bookWithFile || !bookWithFile.fileData) {
+            console.warn(`⚠️ "${book.title}" 파일 데이터를 찾을 수 없음`);
+            failCount++;
+            continue;
+          }
+          
+          // 메타데이터 추출
+          const metadata = await EpubMetadataExtractor.extractMetadata(bookWithFile.fileData);
+          
+          // 업데이트할 정보 확인
+          const updates = {};
+          let hasUpdates = false;
+          
+          if (metadata.title && metadata.title !== book.title) {
+            updates.title = metadata.title;
+            hasUpdates = true;
+          }
+          
+          if (metadata.author && metadata.author !== book.author) {
+            updates.author = metadata.author;
+            hasUpdates = true;
+          }
+          
+          if (metadata.publisher && !book.publisher) {
+            updates.publisher = metadata.publisher;
+            hasUpdates = true;
+          }
+          
+          if (metadata.language && !book.language) {
+            updates.language = metadata.language;
+            hasUpdates = true;
+          }
+          
+          if (metadata.description && !book.description) {
+            updates.description = metadata.description;
+            hasUpdates = true;
+          }
+          
+          if (hasUpdates) {
+            const updatedBook = { ...book, ...updates };
+            
+            // IndexedDB에 업데이트된 메타데이터 저장
+            await indexedDBStorage.saveBookMetadata(updatedBook);
+            
+            // React 상태 업데이트
+            setBooks(prev => prev.map(b => 
+              b.id === book.id ? updatedBook : b
+            ));
+            
+            console.log(`✅ "${book.title}" 메타데이터 업데이트 완료:`, updates);
+            successCount++;
+          } else {
+            console.log(`📋 "${book.title}" 업데이트할 메타데이터 없음`);
+          }
+          
+          // 다음 책 처리 전 잠시 대기 (UI 블로킹 방지)
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+        } catch (error) {
+          console.error(`❌ "${book.title}" 메타데이터 업데이트 실패:`, error);
+          failCount++;
+        }
+      }
+      
+      console.log(`🎉 메타데이터 업데이트 완료: 성공 ${successCount}권, 실패 ${failCount}권`);
+      
+    } catch (error) {
+      console.error('❌ 기존 책 메타데이터 업데이트 중 오류:', error);
+    }
+  };
+
   const value = {
     books,
     currentBook,
@@ -400,13 +651,17 @@ export const BookProvider = ({ children }) => {
     updateBook,
     getBookById,
     getBookWithFile,
-    updateProgress,
+    saveBookmark,
+    getBookmark,
+    getAllBookmarks,
     getMostPopular,
     getRecentlyAdded,
     cleanupStorage,
     saveReadingSettings,
     getReadingSettings,
-    updateStorageUsage
+    updateStorageUsage,
+    extractCoverForExistingBooks,
+    updateMetadataForExistingBooks
   };
 
   return (

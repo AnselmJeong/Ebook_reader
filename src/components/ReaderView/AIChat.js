@@ -568,7 +568,14 @@ const AIChat = ({ book, currentPage, onClose }) => {
                 >
                   <ChatItemHeader>
                     <ChatItemTitle>
-                      페이지 {chat.pageNumber} - AI 채팅
+                      페이지 {(() => {
+                        if (typeof chat.pageNumber === 'number') {
+                          return chat.pageNumber;
+                        } else if (typeof chat.pageNumber === 'object' && chat.pageNumber?.currentPage) {
+                          return chat.pageNumber.currentPage;
+                        }
+                        return 1;
+                      })()} - AI 채팅
                     </ChatItemTitle>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <ChatItemTime>
@@ -600,7 +607,14 @@ const AIChat = ({ book, currentPage, onClose }) => {
               <FiMinimize2 size={16} />
             </HeaderButton>
             <span style={{ marginLeft: '10px', fontSize: '0.9rem', color: '#666' }}>
-              페이지 {activeChat.pageNumber}
+              페이지 {(() => {
+                if (typeof activeChat.pageNumber === 'number') {
+                  return activeChat.pageNumber;
+                } else if (typeof activeChat.pageNumber === 'object' && activeChat.pageNumber?.currentPage) {
+                  return activeChat.pageNumber.currentPage;
+                }
+                return 1;
+              })()}
             </span>
           </div>
 

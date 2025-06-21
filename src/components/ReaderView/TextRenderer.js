@@ -287,7 +287,7 @@ const TextRenderer = ({
 
   // 페이지 변경 처리
   useEffect(() => {
-    if (viewer && !loading && currentPage !== undefined) {
+    if (viewer && !loading && typeof currentPage === 'number' && !isNaN(currentPage) && isFinite(currentPage)) {
       try {
         // foliate-js의 페이지 네비게이션
         const progress = (currentPage - 1) / Math.max(totalPages - 1, 1);
@@ -349,7 +349,7 @@ const TextRenderer = ({
         <NavButton 
           theme={settings.theme}
           onClick={handlePrevPage}
-          disabled={currentPage <= 1}
+          disabled={typeof currentPage === 'number' ? currentPage <= 1 : true}
         >
           <FiChevronLeft />
           이전
@@ -362,7 +362,7 @@ const TextRenderer = ({
             type="number"
             min="1"
             max={totalPages}
-            value={currentPage}
+            value={typeof currentPage === 'number' && !isNaN(currentPage) && isFinite(currentPage) ? currentPage : 1}
             onChange={handlePageInputChange}
           />
           / {totalPages}
@@ -371,7 +371,7 @@ const TextRenderer = ({
         <NavButton 
           theme={settings.theme}
           onClick={handleNextPage}
-          disabled={currentPage >= totalPages}
+          disabled={typeof currentPage === 'number' ? currentPage >= totalPages : true}
         >
           다음
           <FiChevronRight />

@@ -4,6 +4,8 @@
  */
 
 class IndexedDBStorage {
+  static instance = null;
+  
   constructor() {
     this.dbName = 'EReaderDB';
     this.version = 1;
@@ -19,6 +21,16 @@ class IndexedDBStorage {
       highlights: 'highlights', // 하이라이트
       chats: 'chats'           // AI 채팅 기록
     };
+  }
+
+  /**
+   * 싱글톤 인스턴스 반환
+   */
+  static getInstance() {
+    if (!IndexedDBStorage.instance) {
+      IndexedDBStorage.instance = new IndexedDBStorage();
+    }
+    return IndexedDBStorage.instance;
   }
 
   /**
@@ -365,6 +377,48 @@ class IndexedDBStorage {
   }
 
   /**
+   * 표지 이미지 저장
+   */
+  async saveCoverImage(bookId, coverImageDataUrl) {
+    try {
+      if (!this.db) {
+        await this.ensureConnection();
+      }
+
+      const transaction = await this.getTransaction([this.stores.books], 'readwrite');
+      const store = transaction.objectStore(this.stores.books);
+      
+      // 기존 책 정보 가져오기
+      const book = await new Promise((resolve, reject) => {
+        const request = store.get(bookId);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+
+      if (book) {
+        book.coverImage = coverImageDataUrl;
+        book.coverUpdatedAt = new Date().toISOString();
+        
+        await new Promise((resolve, reject) => {
+          const request = store.put(book);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        
+        console.log('✅ 표지 이미지 저장 완료:', bookId);
+        return true;
+      } else {
+        console.warn('⚠️ 책을 찾을 수 없음:', bookId);
+        return false;
+      }
+
+    } catch (error) {
+      console.error('❌ 표지 이미지 저장 실패:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 읽기 설정 저장
    */
   async saveSettings(bookId, settings) {
@@ -397,6 +451,159 @@ class IndexedDBStorage {
       request.onsuccess = () => resolve(request.result?.settings || null);
       request.onerror = () => reject(request.error);
     });
+  }
+
+  /**
+   * CFI 기반 북마크 저장 (읽기 위치)
+   */
+  async saveBookmark(bookId, bookmark) {
+    try {
+      const transaction = await this.getTransaction([this.stores.settings], 'readwrite');
+      const store = transaction.objectStore(this.stores.settings);
+      
+      const bookmarkData = {
+        id: `bookmark-${bookId}`,
+        bookId,
+        bookmark: {
+          // CFI 정보 (핵심)
+          cfi: bookmark.cfi || bookmark.epubcfi || null,
+          epubcfi: bookmark.epubcfi || bookmark.cfi || null, // 호환성을 위해 중복 저장
+          
+          // 진행률 정보
+          progress: bookmark.progress || 0, // 0-100%
+          percentage: bookmark.percentage || 0, // 0-1
+          
+          // 페이지 정보 (참고용)
+          currentPage: bookmark.currentPage || 1,
+          totalPages: bookmark.totalPages || 100,
+          
+          // 챕터 정보
+          chapterHref: bookmark.chapterHref || null,
+          chapterTitle: bookmark.chapterTitle || null,
+          
+          // 위치 정보 (전체 객체)
+          location: bookmark.location || null,
+          
+          // 메타데이터
+          timestamp: bookmark.timestamp || new Date().toISOString(),
+          readingTime: bookmark.readingTime || Date.now()
+        },
+        updatedAt: new Date().toISOString()
+      };
+      
+      return new Promise((resolve, reject) => {
+        const request = store.put(bookmarkData);
+        request.onsuccess = () => {
+          console.log(`🔖 CFI 북마크 저장: ${bookId} - ${bookmarkData.bookmark.progress}% (CFI: ${bookmarkData.bookmark.cfi ? '있음' : '없음'})`);
+          resolve(request.result);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ CFI 북마크 저장 실패:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * CFI 기반 북마크 조회 (읽기 위치)
+   */
+  async getBookmark(bookId) {
+    try {
+      const transaction = await this.getTransaction([this.stores.settings]);
+      const store = transaction.objectStore(this.stores.settings);
+      
+      return new Promise((resolve, reject) => {
+        const request = store.get(`bookmark-${bookId}`);
+        request.onsuccess = () => {
+          const result = request.result?.bookmark || null;
+          if (result) {
+            console.log(`🔖 CFI 북마크 조회: ${bookId} - ${result.progress}% (CFI: ${result.cfi ? '있음' : '없음'})`);
+            
+            // CFI 호환성 확인 및 보정
+            if (!result.cfi && !result.epubcfi && result.location?.start?.cfi) {
+              result.cfi = result.location.start.cfi;
+              result.epubcfi = result.location.start.cfi;
+            }
+          } else {
+            console.log(`🔖 북마크 없음: ${bookId}`);
+          }
+          resolve(result);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ CFI 북마크 조회 실패:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 모든 북마크 조회 (통계용)
+   */
+  async getAllBookmarks() {
+    try {
+      const transaction = await this.getTransaction([this.stores.settings]);
+      const store = transaction.objectStore(this.stores.settings);
+      
+      return new Promise((resolve, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => {
+          const bookmarks = request.result
+            .filter(item => item.id.startsWith('bookmark-'))
+            .map(item => ({
+              bookId: item.bookId,
+              ...item.bookmark
+            }));
+          resolve(bookmarks);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ 모든 북마크 조회 실패:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 책의 진행률 업데이트 (책 메타데이터에 저장)
+   */
+  async updateBookProgress(bookId, progress, lastReadPage = null) {
+    try {
+      const transaction = await this.getTransaction([this.stores.books], 'readwrite');
+      const store = transaction.objectStore(this.stores.books);
+      
+      // 기존 책 정보 가져오기
+      const book = await new Promise((resolve, reject) => {
+        const request = store.get(bookId);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+
+      if (book) {
+        book.progress = Math.max(0, Math.min(100, progress)); // 0-100 범위로 제한
+        book.lastOpened = new Date().toISOString();
+        if (lastReadPage !== null) {
+          book.lastReadPage = lastReadPage;
+        }
+        
+        await new Promise((resolve, reject) => {
+          const request = store.put(book);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        
+        console.log(`📊 진행률 업데이트: ${bookId} - ${progress}%`);
+        return true;
+      } else {
+        console.warn('⚠️ 책을 찾을 수 없음:', bookId);
+        return false;
+      }
+
+    } catch (error) {
+      console.error('❌ 진행률 업데이트 실패:', error);
+      throw error;
+    }
   }
 
   /**
@@ -510,7 +717,8 @@ class IndexedDBStorage {
   }
 }
 
-// 싱글톤 인스턴스
+// 싱글톤 인스턴스 (호환성을 위해 유지)
 const indexedDBStorage = new IndexedDBStorage();
 
+export { IndexedDBStorage };
 export default indexedDBStorage; 

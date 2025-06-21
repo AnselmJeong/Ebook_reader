@@ -44,7 +44,11 @@ const ReactReaderRenderer = forwardRef(({
   onTotalPagesChange,
   onChaptersChange,
   onTextSelection,
-  onError 
+  onError,
+  onLocationChange,
+  onPageChangeInternal,
+  initialLocation,
+  totalPages
 }, ref) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -208,6 +212,16 @@ const ReactReaderRenderer = forwardRef(({
       document.removeEventListener('click', handleClick);
     };
   }, [contextMenu]);
+
+  // initialLocation 변경 감지 및 로깅
+  useEffect(() => {
+    console.log('📍 ReactReaderRenderer initialLocation 변경:', initialLocation);
+    if (initialLocation) {
+      console.log('🔖 북마크 위치로 시작:', initialLocation);
+    } else {
+      console.log('📖 처음부터 시작 (북마크 없음)');
+    }
+  }, [initialLocation]);
 
   // 책 파일을 URL로 변환 - 간단한 Blob URL 방식
   useEffect(() => {
@@ -386,11 +400,85 @@ const ReactReaderRenderer = forwardRef(({
     };
   }, [book]);
 
-  // 위치 변경 핸들러 (useCallback으로 메모이제이션)
+  // CFI 기반 위치 변경 핸들러 (useCallback으로 메모이제이션)
   const handleLocationChanged = useCallback((epubcfi) => {
     setLocation(epubcfi);
-    // themes API가 자동으로 스타일을 유지하므로 추가 적용 불필요
-  }, []);
+    
+    // 부모 컴포넌트에 CFI 정보와 함께 위치 변경 알림 (북마크 저장용)
+    if (onLocationChange && renditionRef.current?.location) {
+      try {
+        const currentLocation = renditionRef.current.location;
+        const currentBook = renditionRef.current.book;
+        
+        // CFI와 진행률 정보 추출
+        const locationData = {
+          // 위치 정보 (CFI 포함)
+          location: {
+            start: {
+              cfi: currentLocation.start?.cfi || epubcfi,
+              href: currentLocation.start?.href,
+              index: currentLocation.start?.index,
+              percentage: currentLocation.start?.percentage || 0
+            },
+            end: currentLocation.end ? {
+              cfi: currentLocation.end.cfi,
+              href: currentLocation.end.href,
+              index: currentLocation.end.index,
+              percentage: currentLocation.end.percentage || 0
+            } : null
+          },
+          
+          // 챕터 정보
+          href: currentLocation.start?.href,
+          title: currentBook?.navigation?.toc?.find(
+            item => item.href === currentLocation.start?.href
+          )?.label || null,
+          
+          // 진행률 정보
+          progress: currentLocation.start?.percentage || 0,
+          
+          // 원본 CFI 문자열
+          cfi: currentLocation.start?.cfi || epubcfi
+        };
+        
+        console.log('📍 CFI 위치 변경:', {
+          cfi: locationData.cfi,
+          progress: `${Math.round(locationData.progress * 100)}%`,
+          chapter: locationData.title
+        });
+        
+        onLocationChange(locationData);
+      } catch (locationError) {
+        console.warn('⚠️ CFI 위치 정보 추출 실패:', locationError);
+        // 폴백: 기본 정보만 전달
+        onLocationChange({
+          location: { start: { cfi: epubcfi, percentage: 0 } },
+          cfi: epubcfi,
+          progress: 0
+        });
+      }
+    }
+    
+    // 페이지 번호 계산 및 알림 (CFI 기반)
+    if (onPageChangeInternal && renditionRef.current?.location) {
+      try {
+        const currentLocation = renditionRef.current.location;
+        if (currentLocation.start) {
+          // CFI 기반으로 진행률 계산
+          const progress = currentLocation.start.percentage || 0;
+          console.log('📊 CFI 기반 현재 진행률:', `${Math.round(progress * 100)}%`);
+          
+          // 진행률을 기반으로 페이지 번호 계산 (1-100 범위)
+          const estimatedPage = Math.max(1, Math.round(progress * 100));
+          console.log('📄 CFI 기반 계산된 페이지:', `${estimatedPage}/100`);
+          
+          onPageChangeInternal(estimatedPage);
+        }
+      } catch (pageError) {
+        console.warn('⚠️ CFI 기반 페이지 번호 계산 실패:', pageError);
+      }
+    }
+  }, [onLocationChange, onPageChangeInternal]);
 
   // 챕터 이동 함수 (useCallback으로 메모이제이션)
   const goToChapter = useCallback((chapterHref) => {
@@ -477,10 +565,26 @@ const ReactReaderRenderer = forwardRef(({
     }
   }, []);
 
+  // 위치 이동 함수 (북마크 기능용)
+  const goToLocation = useCallback((location) => {
+    if (renditionRef.current && location) {
+      try {
+        console.log('🔖 위치로 이동:', location);
+        renditionRef.current.display(location);
+        return true;
+      } catch (error) {
+        console.error('❌ 위치 이동 실패:', error);
+        return false;
+      }
+    }
+    return false;
+  }, []);
+
   // 부모 컴포넌트에서 챕터 이동 함수에 접근할 수 있도록 노출
   useImperativeHandle(ref, () => ({
-    goToChapter
-  }), [goToChapter]);
+    goToChapter,
+    goToLocation
+  }), [goToChapter, goToLocation]);
 
   // 목차 변경 핸들러 (useCallback으로 메모이제이션) - 무한 루프 방지를 위해 ref 사용
   const lastTocRef = useRef(null);
@@ -745,19 +849,22 @@ const ReactReaderRenderer = forwardRef(({
     // 추가로 우리 함수도 호출
     applySettings(rendition, settings);
     
-    // book이 준비되었을 때 추가 설정 적용
-    if (rendition && rendition.book) {
-      rendition.book.ready.then(() => {
-        if (isUnmountingRef.current) return;
-        
-        console.log('📖 EPUB book 준비됨 - 설정 재적용');
-        // 책이 로드된 후 설정 재적용
-        applySettings(rendition, settings);
-        
-      }).catch((err) => {
-        console.error('❌ EPUB 책 로드 실패:', err);
-        handleReaderError(err);
-      });
+          // book이 준비되었을 때 추가 설정 적용 및 북마크 위치로 이동
+      if (rendition && rendition.book) {
+        rendition.book.ready.then(() => {
+          if (isUnmountingRef.current) return;
+          
+          console.log('📖 EPUB book 준비됨 - 설정 재적용');
+          // 책이 로드된 후 설정 재적용
+          applySettings(rendition, settings);
+          
+          // location prop으로 초기 위치가 설정되므로 별도 이동 불필요
+          console.log('📍 초기 위치는 location prop으로 설정됨:', initialLocation);
+          
+        }).catch((err) => {
+          console.error('❌ EPUB 책 로드 실패:', err);
+          handleReaderError(err);
+        });
 
       // 안전한 이벤트 리스너 추가
       try {
@@ -940,9 +1047,9 @@ const ReactReaderRenderer = forwardRef(({
   return (
     <div style={{ height: '100%' }}>
               <ReactReader
-          key={`reader-${book?.id}`}
+          key={`reader-${book?.id}-${initialLocation || 'start'}`}
           url={finalUrl}
-          location={location}
+          location={initialLocation}
           locationChanged={handleLocationChanged}
           tocChanged={handleTocChanged}
           getRendition={handleGetRendition}

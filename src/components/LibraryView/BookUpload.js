@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import styled from 'styled-components';
 import { FiUpload, FiX, FiFile, FiCheck } from 'react-icons/fi';
 import { useBooks } from '../../context/BookContext';
+import { EpubMetadataExtractor } from '../../utils/EpubMetadataExtractor';
 
 const Overlay = styled.div`
   position: fixed;
@@ -138,6 +139,13 @@ const FileWarning = styled.div`
   font-style: italic;
 `;
 
+const FileSuccess = styled.div`
+  font-size: 0.75rem;
+  color: #4CAF50;
+  margin-top: 2px;
+  font-style: italic;
+`;
+
 const RemoveButton = styled.button`
   background: none;
   border: none;
@@ -225,7 +233,8 @@ const BookUpload = ({ onClose }) => {
         size: file.size,
         type: file.name.toLowerCase().split('.').pop(),
         status: 'ready',
-        warning: warningMessage
+        warning: warningMessage,
+        metadataStatus: null // 메타데이터 추출 상태
       };
     });
 
@@ -255,13 +264,71 @@ const BookUpload = ({ onClose }) => {
   const processFile = async (fileData) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const arrayBuffer = e.target.result;
         
-        // 메타데이터 추출 (실제로는 EPUB/PDF 파서 사용)
+        // 기본 책 정보
+        let title = fileData.name.replace(/\.(epub|pdf)$/i, '');
+        let author = '알 수 없음';
+        let publisher = null;
+        let language = null;
+        let description = null;
+        
+        // EPUB 파일인 경우 메타데이터 추출 시도
+        if (fileData.type === 'epub') {
+          try {
+            console.log('📋 EPUB 메타데이터 추출 시작...');
+            const metadata = await EpubMetadataExtractor.extractMetadata(arrayBuffer);
+            
+            // 추출된 메타데이터가 있으면 사용
+            if (metadata.title) {
+              title = metadata.title;
+              console.log('✅ 제목 추출:', title);
+            }
+            
+            if (metadata.author) {
+              author = metadata.author;
+              console.log('✅ 저자 추출:', author);
+            }
+            
+            if (metadata.publisher) {
+              publisher = metadata.publisher;
+              console.log('✅ 출판사 추출:', publisher);
+            }
+            
+            if (metadata.language) {
+              language = metadata.language;
+              console.log('✅ 언어 추출:', language);
+            }
+            
+            if (metadata.description) {
+              description = metadata.description;
+              console.log('✅ 설명 추출:', description);
+            }
+            
+            // 파일 상태에 메타데이터 추출 성공 표시
+            setFiles(prev => prev.map(f => 
+              f.id === fileData.id ? { ...f, metadataStatus: 'success' } : f
+            ));
+            
+          } catch (metadataError) {
+            console.warn('⚠️ 메타데이터 추출 실패, 파일명 사용:', metadataError);
+            
+            // 파일 상태에 메타데이터 추출 실패 표시
+            setFiles(prev => prev.map(f => 
+              f.id === fileData.id ? { ...f, metadataStatus: 'failed' } : f
+            ));
+            
+            // 실패해도 기본값으로 계속 진행
+          }
+        }
+        
         const book = {
-          title: fileData.name.replace(/\.(epub|pdf)$/i, ''),
-          author: '알 수 없음',
+          title,
+          author,
+          publisher,
+          language,
+          description,
           type: fileData.type,
           fileData: arrayBuffer, // ArrayBuffer로 저장 (react-reader 호환)
           content: null, // base64 content 제거
@@ -351,6 +418,12 @@ const BookUpload = ({ onClose }) => {
                   <FileName>{file.name}</FileName>
                   <FileSize>{formatFileSize(file.size)}</FileSize>
                   {file.warning && <FileWarning>{file.warning}</FileWarning>}
+                  {file.metadataStatus === 'success' && (
+                    <FileSuccess>✅ 메타데이터 추출 완료</FileSuccess>
+                  )}
+                  {file.metadataStatus === 'failed' && (
+                    <FileWarning>⚠️ 메타데이터 추출 실패 (파일명 사용)</FileWarning>
+                  )}
                 </FileInfo>
                 <FileStatus success={file.status === 'success'}>
                   {file.status === 'ready' && '대기 중'}

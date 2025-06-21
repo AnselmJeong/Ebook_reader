@@ -163,7 +163,7 @@ const ErrorContainer = styled.div`
 const ReaderView = () => {
   const { bookId } = useParams();
   const navigate = useNavigate();
-  const { getBookById, getBookWithFile, updateProgress, saveReadingSettings, getReadingSettings } = useBooks();
+  const { getBookById, getBookWithFile, saveReadingSettings, getReadingSettings, saveBookmark, getBookmark } = useBooks();
   
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -189,15 +189,14 @@ const ReaderView = () => {
     textAlign: 'left'
   });
   
-  // 현재 페이지/위치
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  // 목차 관련 상태
   const [bookChapters, setBookChapters] = useState([]);
   
-  // bookChapters 상태 변경 로깅
-  useEffect(() => {
-    // 챕터 변경 로깅은 제거됨
-  }, [bookChapters]);
+  // 북마크 관련 상태
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [lastLocation, setLastLocation] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(100); // EPUB은 진행률 기반으로 100페이지로 설정
 
   useEffect(() => {
     let isMounted = true; // cleanup을 위한 플래그
@@ -207,7 +206,7 @@ const ReaderView = () => {
         setLoading(true);
         
         // 1단계: 메타데이터만 먼저 로드
-        const basicBook = getBookById(bookId);
+        const basicBook = await getBookById(bookId);
         if (!basicBook) {
           console.error('❌ 책을 찾을 수 없음:', bookId);
           if (isMounted) {
@@ -272,11 +271,42 @@ const ReaderView = () => {
           setReadingSettings(savedSettings);
         }
         
-        // 저장된 읽기 위치 로드 (임시로 localStorage 사용, 나중에 IndexedDB로 이전 예정)
-        const savedPosition = localStorage.getItem(`reader-position-${bookId}`);
-        if (savedPosition && isMounted) {
-          setCurrentPage(parseInt(savedPosition));
+        // CFI 기반 북마크 로드 (마지막 읽던 위치)
+        try {
+          const bookmark = await getBookmark(bookId);
+          if (bookmark && isMounted) {
+            console.log('🔖 CFI 북마크 발견:', {
+              cfi: bookmark.cfi || bookmark.epubcfi,
+              progress: bookmark.progress,
+              chapter: bookmark.chapterTitle
+            });
+            
+            // CFI 우선, 없으면 기존 location 사용
+            if (bookmark.cfi || bookmark.epubcfi) {
+              // CFI가 있으면 CFI 문자열로 위치 설정
+              setLastLocation(bookmark.cfi || bookmark.epubcfi);
+              console.log('📍 CFI로 위치 복원:', bookmark.cfi || bookmark.epubcfi);
+            } else if (bookmark.location) {
+              // 기존 location 객체가 있으면 사용
+              setLastLocation(bookmark.location);
+              console.log('📍 Location 객체로 위치 복원');
+            }
+            
+            // 진행률 기반 페이지 정보 설정
+            const progress = bookmark.progress || 0;
+            const estimatedPage = Math.max(1, Math.round(progress));
+            setCurrentPage(estimatedPage);
+            setTotalPages(100); // EPUB은 진행률 기반으로 100 고정
+            
+            console.log('📊 진행률 복원:', `${progress}% (페이지 ${estimatedPage}/100)`);
+          } else {
+            console.log('🔖 북마크 없음 - 처음부터 시작');
+            setLastLocation(null); // 명시적으로 null 설정
+          }
+        } catch (bookmarkError) {
+          console.warn('⚠️ 북마크 로드 실패:', bookmarkError);
         }
+
         
       } catch (err) {
         if (isMounted) {
@@ -308,25 +338,15 @@ const ReaderView = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingSettings, bookId, book]); // saveReadingSettings는 안정적이므로 의존성에서 제외
 
-  // 페이지 변경 시 진행률 업데이트
-  useEffect(() => {
-    if (book && currentPage && totalPages && bookId) {
-      const progress = Math.round((currentPage / totalPages) * 100);
-      updateProgress(bookId, progress);
-      localStorage.setItem(`reader-position-${bookId}`, currentPage.toString());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, totalPages, bookId, book]); // updateProgress는 안정적이므로 의존성에서 제외
+
 
   const handleBack = () => {
     navigate('/');
   };
 
   const handlePageChange = useCallback((page) => {
-    
     // 챕터 네비게이션인지 확인
     if (typeof page === 'object' && page.type === 'chapter') {
-      
       // ReactReaderRenderer에서 챕터로 이동
       if (reactReaderRef.current) {
         // href가 직접 전달되었으면 사용, 아니면 bookChapters에서 찾기
@@ -336,19 +356,10 @@ const ReaderView = () => {
         } else {
           console.warn('⚠️ 챕터 href를 찾을 수 없음');
         }
-      } else {
-        // SimpleEpubRenderer에서 챕터 인덱스를 특별한 페이지 번호로 변환
-        setCurrentPage(-page.chapterIndex - 1); // 음수로 구분
-      }
-    } else {
-      setCurrentPage(page);
-      
-      // 진행률 저장
-      if (book?.id && totalPages > 0) {
-        updateProgress(book.id, page, totalPages);
       }
     }
-  }, [bookChapters, book?.id, totalPages, updateProgress]);
+    // 일반 페이지 변경은 처리하지 않음 (EPUB에서는 의미 없음)
+  }, [bookChapters]);
 
   const handleSettingsChange = useCallback((newSettings) => {
     console.log('🔧 ReaderView 설정 변경:', newSettings);
@@ -361,6 +372,66 @@ const ReaderView = () => {
 
   const handleChaptersChange = useCallback((chapters) => {
     setBookChapters(chapters);
+  }, []);
+
+  // CFI 기반 위치 변경 핸들러 (북마크 자동 저장)
+  const handleLocationChange = useCallback((locationData) => {
+    const { location, href, title } = locationData;
+    setCurrentLocation(location);
+    
+    // CFI 기반 북마크 저장 (디바운스)
+    const saveBookmarkDebounced = setTimeout(async () => {
+      if (bookId && location) {
+        try {
+          // CFI에서 진행률 계산
+          const progress = location.start?.percentage || 0;
+          const estimatedPage = Math.max(1, Math.round(progress * 100));
+          
+          const bookmarkData = {
+            // CFI 정보 (핵심)
+            cfi: location.start?.cfi || null,
+            epubcfi: location.start?.cfi || null, // 호환성을 위해 중복 저장
+            
+            // 진행률 정보
+            progress: Math.round(progress * 100), // 0-100%
+            percentage: progress, // 0-1
+            
+            // 페이지 정보 (참고용)
+            currentPage: estimatedPage,
+            totalPages: 100, // EPUB은 진행률 기반으로 100으로 고정
+            
+            // 챕터 정보
+            chapterHref: href || null,
+            chapterTitle: title || null,
+            
+            // 위치 정보 (전체)
+            location: location,
+            
+            // 메타데이터
+            timestamp: new Date().toISOString(),
+            readingTime: Date.now() // 읽기 시간 추적용
+          };
+          
+          await saveBookmark(bookId, bookmarkData);
+          console.log('🔖 CFI 기반 북마크 자동 저장:', {
+            cfi: bookmarkData.cfi,
+            progress: `${bookmarkData.progress}%`,
+            chapter: bookmarkData.chapterTitle
+          });
+        } catch (error) {
+          console.error('❌ 북마크 저장 실패:', error);
+        }
+      }
+    }, 2000); // 2초 디바운스 (읽기 중 너무 자주 저장되지 않도록)
+
+    return () => clearTimeout(saveBookmarkDebounced);
+  }, [bookId, saveBookmark]);
+
+  // 페이지 변경 핸들러
+  const handlePageChangeInternal = useCallback((page) => {
+    if (typeof page === 'number') {
+      setCurrentPage(page);
+    }
   }, []);
 
   const handleTextSelection = (selectedText, position) => {
@@ -430,11 +501,9 @@ const ReaderView = () => {
         {book && (
           <TableOfContents
             book={book}
-            currentPage={currentPage}
             onPageChange={handlePageChange}
             onClose={() => setShowTOC(false)}
             chapters={bookChapters}
-            totalPages={totalPages}
           />
         )}
       </Sidebar>
@@ -485,20 +554,21 @@ const ReaderView = () => {
                 key={`react-reader-${book?.id}`}
                 book={book}
                 settings={readingSettings}
-                currentPage={currentPage}
                 onPageChange={handlePageChange}
-                onTotalPagesChange={setTotalPages}
                 onChaptersChange={handleChaptersChange}
                 onTextSelection={handleTextSelection}
                 onError={handleRendererError}
+                onLocationChange={handleLocationChange}
+                onPageChangeInternal={handlePageChangeInternal}
+                initialLocation={lastLocation}
+                currentPage={currentPage}
+                totalPages={totalPages}
               />
             ) : (
               <TextRenderer
                 book={book}
                 settings={readingSettings}
-                currentPage={currentPage}
                 onPageChange={handlePageChange}
-                onTotalPagesChange={setTotalPages}
                 onTextSelection={handleTextSelection}
                 onToggleTOC={() => setShowTOC(!showTOC)}
               />
@@ -526,7 +596,6 @@ const ReaderView = () => {
             )}
             <AIChat
               book={book}
-              currentPage={currentPage}
               onClose={() => setShowChat(false)}
             />
           </ChatSidebar>

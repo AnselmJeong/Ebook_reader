@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { FiBookOpen, FiMoreVertical, FiTrash2, FiInfo } from 'react-icons/fi';
 import { useBooks } from '../../context/BookContext';
@@ -22,8 +22,8 @@ const Card = styled.div`
 
 const CoverContainer = styled.div`
   width: 100%;
-  height: 220px;
-  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  height: 280px;
+  background: ${props => props.hasImage ? 'transparent' : 'linear-gradient(135deg, #f8f9fa, #e9ecef)'};
   display: flex;
   align-items: center;
   justify-content: center;
@@ -35,6 +35,11 @@ const CoverImage = styled.img`
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.3s ease;
+  
+  ${Card}:hover & {
+    transform: scale(1.05);
+  }
 `;
 
 const CoverPlaceholder = styled.div`
@@ -46,6 +51,9 @@ const CoverPlaceholder = styled.div`
   font-size: 0.9rem;
   text-align: center;
   padding: 20px;
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  width: 100%;
+  height: 100%;
 `;
 
 const BookIcon = styled(FiBookOpen)`
@@ -54,15 +62,33 @@ const BookIcon = styled(FiBookOpen)`
   opacity: 0.5;
 `;
 
-const ProgressBar = styled.div`
+const CoverImageLoading = styled.div`
   position: absolute;
-  bottom: 0;
-  left: 0;
-  width: ${props => props.progress}%;
-  height: 4px;
-  background: #4CAF50;
-  transition: width 0.3s ease;
+  top: 8px;
+  left: 8px;
+  background: rgba(76, 175, 80, 0.9);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  display: ${props => props.show ? 'block' : 'none'};
 `;
+
+const TypeBadge = styled.div`
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+`;
+
+
 
 const InfoContainer = styled.div`
   padding: 12px;
@@ -110,6 +136,10 @@ const Status = styled.span`
 const LastOpened = styled.span`
   font-size: 0.75rem;
 `;
+
+
+
+
 
 const MoreButton = styled.button`
   position: absolute;
@@ -184,6 +214,8 @@ const MenuContainer = styled.div`
 const BookCard = ({ book, onClick }) => {
   const { removeBook } = useBooks();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [isImageLoading, setIsImageLoading] = useState(false);
   const menuRef = useRef(null);
 
   // 외부 클릭 시 메뉴 닫기
@@ -246,11 +278,85 @@ const BookCard = ({ book, onClick }) => {
     
     const fileSize = book.size ? `${(book.size / 1024 / 1024).toFixed(2)} MB` : '알 수 없음';
     const addedDate = book.addedDate ? new Date(book.addedDate).toLocaleDateString() : '알 수 없음';
+    const lastOpened = book.lastOpened ? new Date(book.lastOpened).toLocaleDateString() : '없음';
+    const hasCover = book.coverImage ? '있음' : '없음';
+    const getBookmarkInfo = () => {
+      // CFI 기반 북마크 정보 추출
+      if (book.lastReadPage && typeof book.lastReadPage === 'object') {
+        const bookmark = book.lastReadPage;
+        
+        // 진행률 정보가 있으면 우선 사용
+        if (typeof bookmark.progress === 'number' && bookmark.progress > 0) {
+          const chapterInfo = bookmark.chapterTitle ? ` (${bookmark.chapterTitle})` : '';
+          return `${bookmark.progress}%${chapterInfo}`;
+        }
+        
+        // 페이지 정보가 있으면 사용
+        if (typeof bookmark.currentPage === 'number' && bookmark.currentPage > 0) {
+          return `페이지 ${bookmark.currentPage}`;
+        }
+        
+        // CFI 정보가 있으면 표시
+        if (bookmark.cfi || bookmark.epubcfi) {
+          return 'CFI 북마크';
+        }
+      }
+      
+      // 숫자 형태의 페이지 정보 (구버전 호환)
+      if (typeof book.lastReadPage === 'number' && book.lastReadPage > 0) {
+        return `페이지 ${book.lastReadPage}`;
+      }
+      
+      return null;
+    };
     
-    alert(`📖 책 정보\n\n제목: ${book.title}\n저자: ${book.author}\n파일 크기: ${fileSize}\n추가일: ${addedDate}\n진행률: ${book.progress || 0}%`);
+    const bookmarkInfo = getBookmarkInfo() || '없음';
+    
+    // 추가 메타데이터 정보 구성
+    let infoText = `📖 책 정보\n\n제목: ${book.title}\n저자: ${book.author}`;
+    
+    if (book.publisher) {
+      infoText += `\n출판사: ${book.publisher}`;
+    }
+    
+    if (book.language) {
+      infoText += `\n언어: ${book.language}`;
+    }
+    
+    if (book.description) {
+      const shortDescription = book.description.length > 100 
+        ? book.description.substring(0, 100) + '...' 
+        : book.description;
+      infoText += `\n설명: ${shortDescription}`;
+    }
+    
+    infoText += `\n\n📁 파일 정보`;
+    infoText += `\n파일 크기: ${fileSize}`;
+    infoText += `\n파일 형식: ${book.type?.toUpperCase() || '알 수 없음'}`;
+    
+    infoText += `\n\n📚 읽기 정보`;
+    infoText += `\n추가일: ${addedDate}`;
+    infoText += `\n마지막 열람: ${lastOpened}`;
+    infoText += `\n북마크: ${bookmarkInfo}`;
+    infoText += `\n표지: ${hasCover}`;
+    
+    alert(infoText);
     
     setIsMenuOpen(false);
   };
+
+  const handleImageLoad = useCallback(() => {
+    setIsImageLoading(false);
+    setImageError(false);
+  }, []);
+
+  const handleImageError = useCallback(() => {
+    setIsImageLoading(false);
+    setImageError(true);
+  }, []);
+
+  // 이미지가 있는지 확인
+  const hasValidCoverImage = book.coverImage && !imageError;
 
   // 메뉴 외부 클릭시 닫기
   const handleCardClick = (e) => {
@@ -263,16 +369,41 @@ const BookCard = ({ book, onClick }) => {
 
   return (
     <Card onClick={handleCardClick}>
-      <CoverContainer>
-        {book.coverImage ? (
-          <CoverImage src={book.coverImage} alt={book.title} />
+      <CoverContainer hasImage={hasValidCoverImage}>
+        {hasValidCoverImage ? (
+          <CoverImage 
+            src={book.coverImage} 
+            alt={book.title}
+            onLoad={handleImageLoad}
+            onError={handleImageError}
+          />
         ) : (
           <CoverPlaceholder>
             <BookIcon />
             <span>{book.type?.toUpperCase()}</span>
+            {book.type === 'epub' && !book.coverImage && (
+              <div style={{ marginTop: '8px', fontSize: '0.7rem', color: '#ccc' }}>
+                표지 추출 중...
+              </div>
+            )}
           </CoverPlaceholder>
         )}
-        {book.progress > 0 && <ProgressBar progress={book.progress} />}
+        
+
+        
+        {/* 표지 추출 진행 표시 */}
+        <CoverImageLoading show={book.type === 'epub' && !book.coverImage && !imageError}>
+          표지 생성 중
+        </CoverImageLoading>
+        
+
+        
+        {/* 파일 타입 뱃지 */}
+        <TypeBadge>
+          {book.type?.toUpperCase() || 'BOOK'}
+        </TypeBadge>
+        
+
       </CoverContainer>
       
       <MenuContainer ref={menuRef}>
@@ -299,9 +430,59 @@ const BookCard = ({ book, onClick }) => {
           <Status free={book.price === 0 || book.price === undefined}>
             {book.price === 0 || book.price === undefined ? 'FREE' : '유료'}
           </Status>
-          {book.lastOpened && (
-            <LastOpened>{formatDate(book.lastOpened)}</LastOpened>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+            {book.lastOpened && (
+              <LastOpened>{formatDate(book.lastOpened)}</LastOpened>
+            )}
+            {(() => {
+              const getCFIBookmarkDisplay = () => {
+                // CFI 기반 북마크 정보 추출
+                if (book.lastReadPage && typeof book.lastReadPage === 'object') {
+                  const bookmark = book.lastReadPage;
+                  
+                  // 진행률 정보가 있으면 우선 사용
+                  if (typeof bookmark.progress === 'number' && bookmark.progress > 0) {
+                    return `${bookmark.progress}%`;
+                  }
+                  
+                  // 페이지 정보가 있으면 사용
+                  if (typeof bookmark.currentPage === 'number' && bookmark.currentPage > 0) {
+                    return `페이지 ${bookmark.currentPage}`;
+                  }
+                  
+                  // CFI 정보가 있으면 표시
+                  if (bookmark.cfi || bookmark.epubcfi) {
+                    return 'CFI';
+                  }
+                }
+                
+                // 숫자 형태의 페이지 정보 (구버전 호환)
+                if (typeof book.lastReadPage === 'number' && book.lastReadPage > 0) {
+                  return `페이지 ${book.lastReadPage}`;
+                }
+                
+                return null;
+              };
+              
+              const bookmarkDisplay = getCFIBookmarkDisplay();
+              
+              if (bookmarkDisplay) {
+                return (
+                  <div style={{ 
+                    fontSize: '0.7rem', 
+                    color: '#4CAF50', 
+                    fontWeight: '500',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2px'
+                  }}>
+                    🔖 {bookmarkDisplay}
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </div>
         </MetaInfo>
       </InfoContainer>
     </Card>

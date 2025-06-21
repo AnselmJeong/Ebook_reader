@@ -50,7 +50,7 @@ const ChapterList = styled.div`
 const ChapterItem = styled.div`
   cursor: pointer;
   transition: background-color 0.2s ease;
-  margin: 4px 0;
+  margin: 2px 0;
   
   &:hover {
     background: #f8f9fa;
@@ -68,16 +68,38 @@ const ChapterItem = styled.div`
 const ChapterHeader = styled.div`
   display: flex;
   align-items: center;
-  padding: 8px 20px;
+  padding: ${props => {
+    // 레벨에 따른 들여쓰기
+    const baseLeft = 20;
+    const indent = (props.level - 1) * 20;
+    return `8px ${baseLeft}px 8px ${baseLeft + indent}px`;
+  }};
   gap: 8px;
 `;
 
+const ExpandButton = styled.button`
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  color: #666;
+  font-size: 12px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: #333;
+  }
+`;
 
 const ChapterTitle = styled.div`
   flex: 1;
-  font-size: 0.9rem;
-  color: ${props => props.active ? '#1976d2' : '#333'};
-  font-weight: ${props => props.active ? '600' : '500'};
+  font-size: ${props => props.level === 1 ? '0.95rem' : '0.85rem'};
+  color: ${props => props.active ? '#1976d2' : (props.level === 1 ? '#333' : '#555')};
+  font-weight: ${props => props.active ? '600' : (props.level === 1 ? '600' : '500')};
   line-height: 1.4;
   text-decoration: none;
   cursor: pointer;
@@ -93,19 +115,70 @@ const ChapterTitle = styled.div`
 
 
 const TableOfContents = ({ book, currentPage, onPageChange, onClose, chapters: bookChapters, totalPages }) => {
-  // bookChapters를 직접 변환하여 사용 (useState 제거)
+  // 확장/축소 상태 관리
+  const [expandedItems, setExpandedItems] = React.useState(new Set());
+
+  // bookChapters를 계층 구조로 변환
   const chapters = React.useMemo(() => {
+    console.log('📖 원본 TOC 데이터:', bookChapters);
+    
     // EPUB 데이터가 있으면 사용, 없으면 샘플 데이터
     if (bookChapters && bookChapters.length > 0) {
-      // 실제 EPUB 챕터 데이터를 TOC 형식으로 변환
-      return bookChapters.map((chapter, index) => ({
-        id: index + 1,
-        title: chapter.title,
-        href: chapter.href, // href 정보 포함
-        page: 1, // 페이지 번호는 실제로는 의미없음
-        level: 1,
-        chapterIndex: index
-      }));
+      // 실제 EPUB 챕터 데이터를 그대로 사용하되, 계층 구조만 추가
+      const processedChapters = [];
+      let chapterId = 1;
+      
+      // 재귀적으로 챕터와 서브아이템을 처리하는 함수
+      const processChapter = (chapter, index, level = 1, parentId = null) => {
+        // 유효성 검사
+        if (!chapter || typeof chapter !== 'object') {
+          console.warn('⚠️ 유효하지 않은 챕터 데이터:', chapter);
+          return;
+        }
+        
+        // 안전하게 title 처리
+        const title = (chapter.title || chapter.label || `Chapter ${index}`).trim();
+        const hasChildren = chapter.subitems && Array.isArray(chapter.subitems) && chapter.subitems.length > 0;
+        
+        console.log(`📖 "${title}" -> 레벨: ${level}, 자식있음: ${hasChildren}, 서브아이템: ${chapter.subitems?.length || 0}`);
+        console.log('🔍 챕터 객체:', chapter);
+        
+        const chapterData = {
+          id: chapterId++,
+          title: title,
+          href: chapter.href,
+          page: 1,
+          level: level,
+          chapterIndex: index,
+          hasChildren: hasChildren,
+          parentId: parentId
+        };
+        
+        processedChapters.push(chapterData);
+        
+        // 서브아이템이 있으면 재귀적으로 처리
+        if (hasChildren) {
+          chapter.subitems.forEach((subitem, subIndex) => {
+            processChapter(subitem, `${index}-${subIndex}`, level + 1, chapterData.id);
+          });
+        }
+      };
+      
+      bookChapters.forEach((chapter, index) => {
+        processChapter(chapter, index);
+      });
+      
+      // 기본적으로 Part들을 확장된 상태로 설정
+      const defaultExpanded = new Set();
+      processedChapters.forEach(chapter => {
+        if (chapter.title.match(/^Part\s+[IVX]+:/i) && chapter.hasChildren) {
+          defaultExpanded.add(chapter.id);
+        }
+      });
+      setExpandedItems(defaultExpanded);
+      
+      console.log('📚 처리된 챕터들:', processedChapters);
+      return processedChapters;
     } else {
       // 폴백: 샘플 데이터
       if (book?.type === 'pdf') {
@@ -124,8 +197,46 @@ const TableOfContents = ({ book, currentPage, onPageChange, onClose, chapters: b
 
 
 
-  const handleChapterClick = (chapter) => {
+  // 확장/축소 토글
+  const toggleExpand = (chapterId) => {
+    console.log('🔄 토글 시도:', chapterId);
+    setExpandedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(chapterId)) {
+        console.log('📁 닫기:', chapterId);
+        newSet.delete(chapterId);
+      } else {
+        console.log('📂 열기:', chapterId);
+        newSet.add(chapterId);
+      }
+      console.log('📋 업데이트된 확장 목록:', Array.from(newSet));
+      return newSet;
+    });
+  };
+
+  // 표시할 챕터 목록 계산 (계층 구조 고려)
+  const visibleChapters = React.useMemo(() => {
+    const visible = [];
     
+    chapters.forEach(chapter => {
+      if (chapter.level === 1) {
+        // 레벨 1은 항상 표시
+        visible.push(chapter);
+      } else {
+        // 레벨 2 이상은 부모가 확장되었을 때만 표시
+        if (chapter.parentId && expandedItems.has(chapter.parentId)) {
+          visible.push(chapter);
+        }
+      }
+    });
+    
+    console.log('👁️ 표시할 챕터들:', visible.map(c => `${c.title} (레벨: ${c.level})`));
+    console.log('📂 확장된 항목들:', Array.from(expandedItems));
+    
+    return visible;
+  }, [chapters, expandedItems]);
+
+  const handleChapterClick = (chapter) => {
     // href가 있으면 ReactReader용 챕터 이동, 없으면 기존 방식
     if (chapter.href && onPageChange) {
       // ReactReader의 경우 href로 직접 이동
@@ -165,27 +276,45 @@ const TableOfContents = ({ book, currentPage, onPageChange, onClose, chapters: b
         <ChapterList>
           {chapters.length === 0 ? (
             <ChapterItem>
-              <ChapterHeader>
-                <ChapterTitle style={{ color: '#999', fontStyle: 'italic' }}>
+              <ChapterHeader level={1}>
+                <ChapterTitle level={1} style={{ color: '#999', fontStyle: 'italic' }}>
                   목차를 로드하는 중...
                 </ChapterTitle>
               </ChapterHeader>
             </ChapterItem>
           ) : (
-            chapters.map(chapter => {
+            visibleChapters.map(chapter => {
               const isActive = chapter.id === currentChapterId;
               const isDisabled = chapter.title === '챕터 로딩 중...';
+              const isExpanded = expandedItems.has(chapter.id);
+              const hasChildren = chapter.hasChildren;
 
               return (
                 <ChapterItem key={chapter.id} active={isActive}>
                   <ChapterHeader 
-                    onClick={() => !isDisabled && handleChapterClick(chapter)}
+                    level={chapter.level}
                     style={{ cursor: isDisabled ? 'default' : 'pointer' }}
                   >
+                    {/* 확장/축소 버튼 (자식이 있는 경우만) */}
+                    {hasChildren ? (
+                      <ExpandButton 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpand(chapter.id);
+                        }}
+                      >
+                        {isExpanded ? '▼' : '▶'}
+                      </ExpandButton>
+                    ) : (
+                      <div style={{ width: '16px' }} /> // 빈 공간 유지
+                    )}
+                    
                     <ChapterTitle 
+                      level={chapter.level}
                       active={isActive}
+                      onClick={() => !isDisabled && handleChapterClick(chapter)}
                       style={{ 
-                        color: isDisabled ? '#999' : (isActive ? '#1976d2' : '#333'),
+                        color: isDisabled ? '#999' : (isActive ? '#1976d2' : (chapter.level === 1 ? '#333' : '#555')),
                         fontStyle: isDisabled ? 'italic' : 'normal'
                       }}
                     >

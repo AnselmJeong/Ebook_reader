@@ -4,10 +4,19 @@ import JSZip from 'jszip';
 export class EpubAnalyzer {
   static async analyzeEpub(fileData) {
     try {
+      // 파일 데이터 유효성 검사
+      if (!fileData) {
+        throw new Error('파일 데이터가 없습니다');
+      }
+
       // ArrayBuffer를 Uint8Array로 변환
       let buffer;
       if (fileData instanceof ArrayBuffer) {
         buffer = fileData;
+      } else if (fileData instanceof Uint8Array) {
+        buffer = fileData.buffer;
+      } else if (fileData instanceof Blob) {
+        buffer = await fileData.arrayBuffer();
       } else if (typeof fileData === 'string' && fileData.startsWith('data:')) {
         // base64 데이터 변환
         const base64Data = fileData.split(',')[1];
@@ -18,7 +27,13 @@ export class EpubAnalyzer {
           view[i] = binaryString.charCodeAt(i);
         }
       } else {
-        throw new Error('지원되지 않는 파일 형식');
+        console.warn('⚠️ 지원되지 않는 파일 형식:', typeof fileData, fileData?.constructor?.name);
+        throw new Error(`지원되지 않는 파일 형식: ${typeof fileData}`);
+      }
+
+      // 버퍼 크기 검사
+      if (!buffer || buffer.byteLength === 0) {
+        throw new Error('빈 파일 데이터입니다');
       }
 
       // ZIP 파일 파싱

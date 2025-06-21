@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import styled from 'styled-components';
 import LibraryView from './components/LibraryView/LibraryView';
@@ -6,6 +6,7 @@ import ReaderView from './components/ReaderView/ReaderView';
 import { BookProvider } from './context/BookContext';
 import { HighlightProvider } from './context/HighlightContext';
 import { ChatProvider } from './context/ChatContext';
+import EmergencyFix from './utils/EmergencyFix';
 
 const AppContainer = styled.div`
   width: 100%;
@@ -14,6 +15,11 @@ const AppContainer = styled.div`
 `;
 
 function App() {
+  // 긴급 복구 도구를 전역에 등록
+  useEffect(() => {
+    EmergencyFix.registerGlobalFunctions();
+  }, []);
+
   return (
     <BookProvider>
       <HighlightProvider>
