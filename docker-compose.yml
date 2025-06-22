@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  ebook-reader:
+    build: .
+    ports:
+      - '8253:80'
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production 

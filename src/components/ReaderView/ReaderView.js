@@ -13,10 +13,12 @@ import LoadingSpinner from './LoadingSpinner';
 import HighlightList from './HighlightList';
 
 const Container = styled.div`
-  width: 100%;
+  width: 100vw;
   height: 100vh;
   display: flex;
   background: #fafafa;
+  overflow: hidden;
+  position: relative;
 `;
 
 const Sidebar = styled.div`
@@ -30,10 +32,22 @@ const Sidebar = styled.div`
 `;
 
 const MainContent = styled.div`
-  flex: 1;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
+`;
+
+const RightSidebar = styled.div`
+  width: ${props => props.isOpen ? '450px' : '0'};
+  flex-shrink: 0;
+  background: white;
+  border-left: 1px solid #e0e0e0;
+  transition: width 0.3s ease;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 `;
 
 const Header = styled.div`
@@ -108,45 +122,18 @@ const HeaderButton = styled.button`
 
 const ReadingArea = styled.div`
   flex: 1;
-  display: flex;
+  position: relative;
   overflow: hidden;
 `;
 
 const ContentArea = styled.div`
-  flex: 1;
+  width: 100%;
+  height: 100%;
   position: relative;
   overflow: hidden;
 `;
 
-const ChatSidebar = styled.div`
-  width: ${props => props.isOpen ? props.width + 'px' : '0'};
-  min-width: ${props => props.isOpen ? '400px' : '0'};
-  max-width: ${props => props.isOpen ? '800px' : '0'};
-  background: white;
-  border-left: 1px solid #e0e0e0;
-  transition: ${props => props.isResizing ? 'none' : 'width 0.3s ease'};
-  overflow: hidden;
-  position: relative;
-`;
 
-const ResizeHandle = styled.div`
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: transparent;
-  cursor: col-resize;
-  z-index: 10;
-  
-  &:hover {
-    background: #4CAF50;
-  }
-  
-  &:active {
-    background: #4CAF50;
-  }
-`;
 
 // LoadingContainer는 현재 사용되지 않음 (LoadingSpinner 컴포넌트 사용)
 
@@ -175,8 +162,16 @@ const ReaderView = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showHighlights, setShowHighlights] = useState(false);
-  const [chatSidebarWidth, setChatSidebarWidth] = useState(600);
-  const [isResizing, setIsResizing] = useState(false);
+  
+  // 사이드바 변경 시 react-reader 리사이즈
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 300); // transition 완료 후
+    
+    return () => clearTimeout(timer);
+  }, [showTOC, showHighlights, showChat]);
+
   
   // ReactReaderRenderer ref
   const reactReaderRef = useRef(null);
@@ -512,27 +507,7 @@ const ReaderView = () => {
     // setShowHighlights(false); // 이 줄을 제거하여 사이드바 유지
   };
 
-  // 사이드바 리사이징 핸들러
-  const handleResizeStart = (e) => {
-    setIsResizing(true);
-    const startX = e.clientX;
-    const startWidth = chatSidebarWidth;
 
-    const handleMouseMove = (e) => {
-      const deltaX = startX - e.clientX;
-      const newWidth = Math.max(400, Math.min(800, startWidth + deltaX));
-      setChatSidebarWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  };
 
   // 렌더러 에러 핸들러
   const handleRendererError = (error) => {
@@ -669,26 +644,18 @@ const ReaderView = () => {
               />
             )}
           </ContentArea>
-
-          <ChatSidebar 
-            isOpen={showChat} 
-            width={chatSidebarWidth}
-            isResizing={isResizing}
-          >
-            {showChat && (
-              <ResizeHandle 
-                onMouseDown={handleResizeStart}
-                title="사이드바 크기 조절"
-              />
-            )}
-            <AIChat
-              book={book}
-              onClose={() => setShowChat(false)}
-              onGoToBookmark={handleGoToBookmark}
-            />
-          </ChatSidebar>
         </ReadingArea>
       </MainContent>
+      
+      <RightSidebar isOpen={showChat}>
+        {book && showChat && (
+          <AIChat
+            book={book}
+            onClose={() => setShowChat(false)}
+            onGoToBookmark={handleGoToBookmark}
+          />
+        )}
+      </RightSidebar>
     </Container>
   );
 };
