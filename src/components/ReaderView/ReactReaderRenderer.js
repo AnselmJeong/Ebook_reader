@@ -1141,14 +1141,28 @@ const ReactReaderRenderer = forwardRef(({
         rendition.on('resized', () => {
           if (isUnmountingRef.current) return;
           
-          console.log('📏 레이아웃 변경 - 설정 재적용');
+          console.log('📏 레이아웃 변경 - 설정 즉시 재적용');
           
-          // 레이아웃 변경 후 설정 재적용
+          // 즉시 적용 (지연 없음)
+          if (rendition && settings) {
+            applySettings(rendition, settings);
+          }
+          
+          // 추가 보험용 재적용
           setTimeout(() => {
             if (!isUnmountingRef.current && rendition && settings) {
               applySettings(rendition, settings);
+              console.log('🔄 resized 후 보험용 재적용 완료');
             }
-          }, 100);
+          }, 50);
+          
+          // 더 강력한 재적용
+          setTimeout(() => {
+            if (!isUnmountingRef.current && rendition && settings) {
+              applySettings(rendition, settings);
+              console.log('💪 resized 후 강력한 재적용 완료');
+            }
+          }, 200);
         });
 
         rendition.on('error', (err) => {

@@ -162,17 +162,7 @@ const ReaderView = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showHighlights, setShowHighlights] = useState(false);
-  
-  // 사이드바 변경 시 react-reader 리사이즈
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      window.dispatchEvent(new Event('resize'));
-    }, 300); // transition 완료 후
-    
-    return () => clearTimeout(timer);
-  }, [showTOC, showHighlights, showChat]);
 
-  
   // ReactReaderRenderer ref
   const reactReaderRef = useRef(null);
   
@@ -185,6 +175,51 @@ const ReaderView = () => {
     margin: 20,
     textAlign: 'left'
   });
+  
+  // 사이드바 변경 시 react-reader 리사이즈
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+      
+      // 추가로 ReactReader에 설정 재적용 요청
+      if (reactReaderRef.current) {
+        const rendition = reactReaderRef.current.getRendition?.();
+        if (rendition && readingSettings) {
+          console.log('🔄 사이드바 변경 후 설정 재적용');
+          // 설정 재적용
+          if (rendition.themes) {
+            const fontSize = readingSettings?.fontSize || 20;
+            const lineHeight = readingSettings?.lineHeight || 1.8;
+            const fontFamily = readingSettings?.fontFamily || 'serif';
+            
+            const fontFamilyMap = {
+              'serif': 'Georgia, serif',
+              'sans-serif': '-apple-system, BlinkMacSystemFont, sans-serif',
+              'monospace': '"Courier New", monospace'
+            };
+            const fontFamilyCSS = fontFamilyMap[fontFamily] || fontFamily;
+            
+            rendition.themes.fontSize(`${fontSize}px`);
+            rendition.themes.font(fontFamilyCSS);
+            
+            const strongStyle = `
+              font-size: ${fontSize}px !important;
+              line-height: ${lineHeight} !important;
+              font-family: ${fontFamilyCSS} !important;
+            `;
+            
+            rendition.themes.override('*', strongStyle);
+            rendition.themes.override('body', strongStyle);
+            rendition.themes.override('p', strongStyle);
+            
+            console.log(`✅ 사이드바 변경 후 설정 재적용 완료: ${fontSize}px`);
+          }
+        }
+      }
+    }, 350); // transition 완료 후 + 설정 적용 시간
+    
+    return () => clearTimeout(timer);
+  }, [showTOC, showHighlights, showChat, readingSettings]);
   
   // 목차 관련 상태
   const [bookChapters, setBookChapters] = useState([]);
